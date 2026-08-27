@@ -1,5 +1,5 @@
 //@version=6
-strategy("Hemanth Ranam — Breakout Retest Pro", shorttitle="HR Breakout Retest Pro", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=1.0, commission_type=strategy.commission.percent, commission_value=0.02, slippage=2, max_labels_count=500, max_lines_count=500)
+strategy("Hemanth Ranam — Breakout Retest Pro", shorttitle="HR Breakout Retest Pro", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=1.0, commission_type=strategy.commission.percent, commission_value=0.02, slippage=2, process_orders_on_close=true, max_labels_count=500, max_lines_count=500)
 
 // =============================================================================
 // HEMANTH RANAM — BREAKOUT + RETEST PRO STRATEGY (PINE SCRIPT V6)
