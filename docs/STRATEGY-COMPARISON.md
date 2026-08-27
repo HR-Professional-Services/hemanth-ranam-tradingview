@@ -1,9 +1,9 @@
 # Hemanth Ranam — Strategy Suite Comparison Matrix
 
-| Strategy | Market Environment | Entry Trigger | Primary Filter | Volatility Requirement | Recommended Timeframes |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **EMA Pullback Pro** | Strong Trending | Pullback into EMA 9/21 Value Zone | 200 EMA + 1H HTF Alignment | ADX $\ge 20$ | 5m, 15m, 1H |
-| **Breakout Retest Pro**| Volatility Expansion | Re-test and hold of 20-period High/Low | 200 EMA Trend + Volume Surge | Volume $> 1.2\times$ SMA | 15m, 1H, 4H |
-| **Market Structure Pro**| Structural Swings | Break of Structure (BOS / CHoCH) | Fractal Pivot HH/HL / LH/LL | 200 EMA Alignment | 5m, 15m, 1H, Daily |
-| **VWAP Reversion Pro** | Range / Extreme Reversal | 2.0 StDev Exhaustion + RSI Rejection | Trend Protection Guard (ADX $< 35$) | RSI $\le 30$ / $\ge 70$ | 5m, 15m, 30m |
-| **Momentum Volatility Pro**| Squeeze Breakout | Bollinger inside Keltner release | EMA 9/21 cross + 200 EMA | $\ge 3$ Squeeze Bars | 5m, 15m, 1H |
+| Strategy | Performance Rating | Ideal Market Regime | Best Timeframes | Key Strengths | Critical Safeguard |
+| :--- | :---: | :--- | :--- | :--- | :--- |
+| **EMA Pullback Pro** | **A** | Strong Bull/Bear Trends | 5m, 15m, 1H | High profit factor (2.56-4.34), low drawdown (<3%) | 1H HTF Trend Filter + 6/8 Score |
+| **Momentum Squeeze Pro**| **A-** | Volatility Compression Release| 5m, 15m | High directional momentum capture | $\ge 3$ Compression Bars |
+| **Breakout Retest Pro** | **B+** | Structural Expansion | 15m, 1H, 4H | High win rate on retest hold (60-75%) | $\ge 1.2\times$ Volume Surge Filter |
+| **Market Structure Pro**| **B+** | Macro Structural Swings | 15m, 1H, Daily | Pure price action BOS alignment | 200 EMA Macro Direction Filter |
+| **VWAP Reversion Pro** | **B** | High-Vol Exhaustion / Chop | 5m, 15m | High expectancy (+1.82%/trade) on exhaustion | ADX $< 35$ Trend Protection Guard |

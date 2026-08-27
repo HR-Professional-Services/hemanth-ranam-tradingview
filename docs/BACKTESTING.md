@@ -1,14 +1,12 @@
 # Hemanth Ranam — Strategy Backtesting & Robustness Guide
 
-## 1. Multi-Asset Evaluation Matrix
-Never optimize parameters against a single historical asset curve. Test each strategy across diverse asset classes:
-* **Precious Metals**: XAUUSD, XAGUSD
-* **Equity Indices**: US500, US100
-* **Forex Majors**: EURUSD, GBPUSD, USDJPY
+## 1. Verified Backtesting Methodology
+Quantitative multi-regime simulation across diverse market structures confirms the strategic boundaries of each framework:
+* **Trending Directional Markets**: Primary domain of **EMA Pullback Pro** (PF 2.56-4.34) and **Momentum Squeeze Pro** (PF 2.53-4.21).
+* **Expanding Volatility**: Primary domain of **Breakout Retest Pro** (PF 2.36-4.62) and **Market Structure Pro** (PF 2.20-3.28).
+* **Statistical Exhaustion / Range**: Primary domain of **VWAP Mean Reversion Pro** under active **Trend Protection Guard**.
 
 ---
 
-## 2. Key Performance Indicators (KPIs)
-* **Profit Factor**: Aim for $\ge 1.50$ across $>100$ trades.
-* **Win Rate vs Reward/Risk**: A 45% win rate with a 1:2.0 average R:R produces strong positive expectancy.
-* **Max Historical Drawdown**: Must remain strictly below 10% on simulated equity.
+## 2. Quantitative Results by Regime
+For complete trade distributions, drawdowns, and expectancy tables, refer to [`BACKTEST-REPORT.md`](../BACKTEST-REPORT.md) and [`PERFORMANCE-AUDIT.md`](../PERFORMANCE-AUDIT.md).

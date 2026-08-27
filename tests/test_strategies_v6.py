@@ -93,10 +93,21 @@ class TestTradingViewSuiteV6(unittest.TestCase):
             self.assertTrue(os.path.exists(doc_path), f"Missing documentation file: {doc}")
 
     def test_audit_and_readme_exist(self):
-        """AUDIT.md and README.md must exist."""
+        """AUDIT.md, BACKTEST-REPORT.md, and README.md must exist."""
         self.assertTrue(os.path.exists(os.path.join(self.root_dir, "AUDIT.md")))
+        self.assertTrue(os.path.exists(os.path.join(self.root_dir, "BACKTEST-REPORT.md")))
+        self.assertTrue(os.path.exists(os.path.join(self.root_dir, "PERFORMANCE-AUDIT.md")))
         self.assertTrue(os.path.exists(os.path.join(self.root_dir, "README.md")))
         self.assertTrue(os.path.exists(os.path.join(self.root_dir, "CHANGELOG.md")))
 
+    def test_backtest_simulation_engine(self):
+        """Validates quantitative backtest simulation engine runs cleanly."""
+        from tests.backtest_engine import MarketDataGenerator, StrategyEvaluator
+        candles = MarketDataGenerator.generate_candles("trending_bull", length=100)
+        res = StrategyEvaluator.run_strategy_backtest(candles, "EMA_Pullback", {"atr_len": 14, "sl_atr_mult": 1.5, "tp_rr_mult": 1.5})
+        self.assertIn("win_rate_pct", res)
+        self.assertIn("profit_factor", res)
+
 if __name__ == "__main__":
     unittest.main()
+
