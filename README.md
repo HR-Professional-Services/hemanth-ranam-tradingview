@@ -1,54 +1,83 @@
-# Hemanth Ranam — Multi-Strategy Trading Engine (TradingView / Pine Script v5)
+# Hemanth Ranam — TradingView Strategy Suite (Pine Script v6)
 
-Institutional-grade, modular TradingView Pine Script v5 indicator suite featuring five robust strategy frameworks, dynamic risk management calculations, a compact on-chart HUD dashboard, and standardized webhook alert JSON payloads.
-
----
-
-## 🎯 Five Strategy Frameworks Included
-
-1. **EMA Pullback & Trend Continuation**: 9/21/200 EMA structure + 1H higher timeframe trend filter + pullback value zone confirmation.
-2. **Breakout + Retest**: 20-period range boundary detection + structural retest hold.
-3. **Market Structure Continuation**: Swing pivot highs/lows (HH/HL/LH/LL) trend tracking.
-4. **VWAP Mean Reversion**: 2.0 Standard Deviation bands + RSI exhaustion confirmation.
-5. **Momentum Volatility Expansion**: Bollinger & Keltner squeeze release breakout detection.
+Professional, modular, and fully backtestable TradingView Strategy Suite engineered under Pine Script v6. Contains five independent trading strategies equipped with multi-factor Setup Quality scoring, dynamic ATR risk management, real-time on-chart HUD telemetry, and structured webhook alert emission.
 
 ---
 
-## 📊 Features & Technical Architecture
-* **Pine Script Version**: `v5`
-* **On-Chart Telemetry HUD**: Displays real-time Trend, EMA Structure, ATR Volatility, and active setup direction.
-* **Dynamic Targets**: Auto-calculates Entry, Stop Loss (1.5 ATR), TP1 (1:1.5 R:R), and TP2 (1:2.5 R:R).
-* **Webhook Automation Ready**: Emits structured JSON alerts compatible with `hemanth-ranam-trading-alert-api`.
+## 🏛️ The Five Strategy Frameworks
+
+| Strategy | Primary Market Environment | Core Method | Risk Model | Pine File |
+| :--- | :--- | :--- | :--- | :--- |
+| **EMA Pullback Pro** | Strong Trending | 9/21/200 EMA + 1H HTF Filter | Dynamic ATR SL / TP | [`HR_EMA_Pullback_Pro.pine`](src/strategies/HR_EMA_Pullback_Pro.pine) |
+| **Breakout Retest Pro**| Volatility Expansion | 20-Period Range Break + Retest Hold | Dynamic ATR SL / TP | [`HR_Breakout_Retest_Pro.pine`](src/strategies/HR_Breakout_Retest_Pro.pine) |
+| **Market Structure Pro**| Structural Swings | Fractal Pivots (HH/HL) + BOS | Dynamic ATR SL / TP | [`HR_Market_Structure_Pro.pine`](src/strategies/HR_Market_Structure_Pro.pine) |
+| **VWAP Reversion Pro** | Statistical Reversals | 2.0 StDev + Trend Protection Guard | Mean Target (VWAP) | [`HR_VWAP_Mean_Reversion_Pro.pine`](src/strategies/HR_VWAP_Mean_Reversion_Pro.pine) |
+| **Momentum Squeeze Pro**| Volatility Compression| Bollinger inside Keltner Release | Dynamic ATR SL / TP | [`HR_Momentum_Volatility_Pro.pine`](src/strategies/HR_Momentum_Volatility_Pro.pine) |
 
 ---
 
-## 📡 Webhook Alert Payload Schema
+## 📁 Repository Directory
+```
+hemanth-ranam-tradingview/
+├── AUDIT.md
+├── CHANGELOG.md
+├── README.md
+│
+├── src/
+│   └── strategies/
+│       ├── HR_EMA_Pullback_Pro.pine
+│       ├── HR_Breakout_Retest_Pro.pine
+│       ├── HR_Market_Structure_Pro.pine
+│       ├── HR_VWAP_Mean_Reversion_Pro.pine
+│       └── HR_Momentum_Volatility_Pro.pine
+│
+├── docs/
+│   ├── GETTING-STARTED.md
+│   ├── STRATEGY-COMPARISON.md
+│   ├── ALERTS.md
+│   ├── BACKTESTING.md
+│   ├── RISK-MANAGEMENT.md
+│   ├── TROUBLESHOOTING.md
+│   ├── EMA-PULLBACK.md
+│   ├── BREAKOUT-RETEST.md
+│   ├── MARKET-STRUCTURE.md
+│   ├── VWAP-MEAN-REVERSION.md
+│   └── MOMENTUM-VOLATILITY.md
+│
+└── tests/
+    └── test_strategies_v6.py
+```
+
+---
+
+## 📡 Webhook Alert JSON Payload Schema
 ```json
 {
   "brand": "Hemanth Ranam",
-  "system": "TradingEngine",
-  "strategy": "EMA Pullback",
+  "system": "TradingView",
+  "strategy": "EMA Pullback Pro",
+  "signal": "BUY",
   "symbol": "XAUUSD",
   "timeframe": "5",
-  "signal": "BUY",
   "entry": 3342.50,
   "stop_loss": 3336.10,
   "take_profit_1": 3351.50,
+  "score": 7,
   "timestamp": 1724784000
 }
 ```
 
 ---
 
-## 🧪 Testing & Validation
+## 🧪 Testing & Static Validation
 ```bash
-python3 -m unittest tests/test_pine_syntax.py
+python3 -m unittest discover tests/
 ```
 
 ---
 
 ## ⚖️ Disclaimer
-*For educational and software development purposes only. Past performance does not guarantee future results. Always plan and manage your trading risk.*
+*For educational and software development purposes only. Past performance does not guarantee future results. Manage risk responsibly.*
 
 **Author**: Hemanth Ranam  
 **Website**: [https://app.hemanth-ranam.workers.dev/](https://app.hemanth-ranam.workers.dev/)
