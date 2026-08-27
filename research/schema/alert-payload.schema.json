@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Alert Payload Standard",
+  "description": "Standardised TradingView alert JSON payload schema for all HR strategy alerts.",
+  "type": "object",
+  "required": ["brand", "system", "strategy", "symbol", "timeframe", "signal", "entry", "stop_loss", "take_profit_1", "timestamp"],
+  "properties": {
+    "brand":            {"type": "string", "const": "Hemanth Ranam"},
+    "system":           {"type": "string", "const": "TradingView"},
+    "strategy":         {"type": "string"},
+    "strategy_version": {"type": "string"},
+    "symbol":           {"type": "string"},
+    "timeframe":        {"type": "string"},
+    "signal":           {"type": "string", "enum": ["BUY", "SELL", "CLOSE_LONG", "CLOSE_SHORT"]},
+    "entry":            {"type": "number"},
+    "stop_loss":        {"type": "number"},
+    "take_profit_1":    {"type": "number"},
+    "take_profit_2":    {"type": ["number", "null"]},
+    "score":            {"type": ["integer", "null"], "description": "Signal quality score (out of 8). Only available on EMA Pullback."},
+    "timestamp":        {"type": "integer", "description": "Unix epoch milliseconds from Pine str.tostring(time)"}
+  },
+  "additionalProperties": false,
+  "notes": "Do not add fields that Pine cannot reliably provide. Pine time is bar open time, not signal fire time."
+}

@@ -1,0 +1,9 @@
+{
+  "schema_version": "1.0",
+  "timeframes": [
+    {"minutes": 5,   "label": "5M",  "tradingview_value": "5",   "category": "intraday_scalp",  "priority": "primary",   "notes": "Primary intraday. Most affected by execution friction."},
+    {"minutes": 15,  "label": "15M", "tradingview_value": "15",  "category": "intraday_scalp",  "priority": "primary",   "notes": "Primary intraday. Balanced signal quality and cost profile."},
+    {"minutes": 60,  "label": "1H",  "tradingview_value": "60",  "category": "swing",           "priority": "secondary", "notes": "Swing. Lower friction impact. Good for EMA Pullback / Market Structure."},
+    {"minutes": 240, "label": "4H",  "tradingview_value": "240", "category": "swing",           "priority": "secondary", "notes": "Higher timeframe swing. Use only for Market Structure Pro."}
+  ]
+}

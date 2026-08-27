@@ -1,0 +1,43 @@
+{
+  "schema_version": "1.0",
+  "description": "Cost friction scenarios for all TradingView backtest evaluations",
+  "scenarios": {
+    "A": {
+      "label": "Reference",
+      "description": "Zero-friction theoretical baseline. Used only as a ceiling reference. Never used as a production assessment.",
+      "commission_pct_per_side": 0.0,
+      "slippage_ticks": 0,
+      "round_trip_friction_pct": 0.0,
+      "note": "SIMULATED ONLY. Not representative of real execution."
+    },
+    "B": {
+      "label": "Realistic",
+      "description": "Standard broker commission and 2-tick slippage on liquid instruments. Representative of normal intraday execution.",
+      "commission_pct_per_side": 0.02,
+      "slippage_ticks": 2,
+      "round_trip_friction_pct": 0.05,
+      "note": "Primary evaluation scenario. Use for production assessments."
+    },
+    "C": {
+      "label": "Stress",
+      "description": "High spread / news event / illiquid session conditions. Models worst-case retail execution.",
+      "commission_pct_per_side": 0.06,
+      "slippage_ticks": 4,
+      "round_trip_friction_pct": 0.15,
+      "note": "Stress test only. If a strategy fails Scenario C it still may be valid under Scenario B."
+    }
+  },
+  "required_for_production": "B",
+  "tradingview_settings": {
+    "commission_type": "Percent of trade value",
+    "commission_value_scenario_B": 0.02,
+    "slippage_value_scenario_B": 2,
+    "position_size_type": "Percent of equity",
+    "position_size_value": 1.0,
+    "initial_capital": 10000,
+    "process_orders_on_close": true,
+    "pyramiding": 0,
+    "calc_on_every_tick": false,
+    "timezone": "UTC"
+  }
+}

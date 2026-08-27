@@ -1,0 +1,84 @@
+{
+  "schema_version": "1.0",
+  "description": "Locked baseline parameters for all five strategies. These are the canonical parameter versions used for all validation work.",
+  "lock_date": "2026-08-27",
+  "lock_warning": "Do not modify these parameters after examining OOS results. Create a new parameter_version instead.",
+  "strategies": {
+    "HR_EMA_Pullback_Pro": {
+      "strategy_version": "1.0",
+      "parameter_version": "1.0",
+      "file": "src/strategies/HR_EMA_Pullback_Pro.pine",
+      "parameters": {
+        "fast_len": {"value": 9,    "label": "Fast EMA"},
+        "mid_len":  {"value": 21,   "label": "Pullback EMA"},
+        "slow_len": {"value": 200,  "label": "Trend EMA"},
+        "htf_res":  {"value": "60", "label": "HTF Resolution (1H)"},
+        "atr_len":  {"value": 14,   "label": "ATR Length"},
+        "sl_atr_mult": {"value": 1.5, "label": "Stop Loss ATR Multiplier"},
+        "tp1_atr_mult": {"value": 1.5, "label": "Take Profit 1 RR"},
+        "min_score": {"value": 6,   "label": "Minimum Signal Score (out of 8)"},
+        "use_session_filter": {"value": true, "label": "Session Filter"},
+        "use_adx_filter": {"value": true, "label": "ADX Filter"}
+      }
+    },
+    "HR_Breakout_Retest_Pro": {
+      "strategy_version": "1.0",
+      "parameter_version": "1.0",
+      "file": "src/strategies/HR_Breakout_Retest_Pro.pine",
+      "parameters": {
+        "range_len": {"value": 20, "label": "Range Lookback Bars"},
+        "atr_len": {"value": 14, "label": "ATR Length"},
+        "sl_atr_mult": {"value": 1.5, "label": "Stop Loss ATR Multiplier"},
+        "vol_multiplier": {"value": 1.2, "label": "Volume Surge Multiplier"},
+        "max_retest_bars": {"value": 10, "label": "Max Bars to Hold Retest"},
+        "use_htf_filter": {"value": true, "label": "HTF Trend Filter"},
+        "use_vol_filter": {"value": true, "label": "Volume Filter"}
+      }
+    },
+    "HR_Market_Structure_Pro": {
+      "strategy_version": "1.0",
+      "parameter_version": "1.0",
+      "file": "src/strategies/HR_Market_Structure_Pro.pine",
+      "parameters": {
+        "pivot_left": {"value": 5, "label": "Pivot Left Bars"},
+        "pivot_right": {"value": 2, "label": "Pivot Right Bars"},
+        "slow_len": {"value": 200, "label": "Trend EMA"},
+        "atr_len": {"value": 14, "label": "ATR Length"},
+        "sl_atr_mult": {"value": 1.5, "label": "Stop Loss ATR Multiplier"},
+        "use_htf_filter": {"value": true, "label": "HTF Structure Filter"}
+      }
+    },
+    "HR_VWAP_Mean_Reversion_Pro": {
+      "strategy_version": "1.0",
+      "parameter_version": "1.0",
+      "file": "src/strategies/HR_VWAP_Mean_Reversion_Pro.pine",
+      "parameters": {
+        "vwap_stdev_mult": {"value": 2.0, "label": "VWAP Standard Deviation Multiplier"},
+        "rsi_len": {"value": 14, "label": "RSI Length"},
+        "rsi_ob": {"value": 70, "label": "RSI Overbought Threshold"},
+        "rsi_os": {"value": 30, "label": "RSI Oversold Threshold"},
+        "adx_len": {"value": 14, "label": "ADX Length"},
+        "max_adx": {"value": 35, "label": "ADX Trend Guard Threshold (CRITICAL)"},
+        "atr_len": {"value": 14, "label": "ATR Length"},
+        "sl_atr_mult": {"value": 1.5, "label": "Stop Loss ATR Multiplier"},
+        "enable_trend_guard": {"value": true, "label": "Trend Protection Guard (MUST REMAIN ON)"}
+      },
+      "critical_notes": ["Trend Protection Guard (ADX < 35) is mandatory. Disabling it causes catastrophic performance in trending markets."]
+    },
+    "HR_Momentum_Volatility_Pro": {
+      "strategy_version": "1.0",
+      "parameter_version": "1.0",
+      "file": "src/strategies/HR_Momentum_Volatility_Pro.pine",
+      "parameters": {
+        "bb_len": {"value": 20, "label": "Bollinger Band Length"},
+        "bb_std": {"value": 2.0, "label": "Bollinger Band StDev"},
+        "kc_len": {"value": 20, "label": "Keltner Channel Length"},
+        "kc_mult": {"value": 1.5, "label": "Keltner Channel ATR Multiplier"},
+        "min_squeeze_bars": {"value": 3, "label": "Minimum Compression Bars"},
+        "atr_len": {"value": 14, "label": "ATR Length"},
+        "sl_atr_mult": {"value": 1.5, "label": "Stop Loss ATR Multiplier"},
+        "use_htf_filter": {"value": true, "label": "HTF Trend Filter"}
+      }
+    }
+  }
+}

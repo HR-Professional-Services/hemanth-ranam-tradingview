@@ -1,0 +1,83 @@
+{
+  "schema_version": "1.0",
+  "description": "Market symbols configuration for TradingView strategy testing",
+  "markets": [
+    {
+      "symbol": "XAUUSD",
+      "tradingview_ticker": "OANDA:XAUUSD",
+      "alt_tickers": ["FOREXCOM:XAUUSD", "TVC:GOLD", "FXCM:XAUUSD"],
+      "asset_class": "precious_metals",
+      "currency": "USD",
+      "pip_value": 0.01,
+      "preferred_sessions": ["London", "New York", "London_NY_overlap"],
+      "priority": "primary",
+      "notes": "Primary trading instrument. Highly liquid. Spread sensitive on 5M."
+    },
+    {
+      "symbol": "XAGUSD",
+      "tradingview_ticker": "OANDA:XAGUSD",
+      "alt_tickers": ["TVC:SILVER", "FOREXCOM:XAGUSD"],
+      "asset_class": "precious_metals",
+      "currency": "USD",
+      "pip_value": 0.001,
+      "preferred_sessions": ["London", "New York"],
+      "priority": "secondary",
+      "notes": "Higher spreads than XAUUSD. Stress test cross-market robustness."
+    },
+    {
+      "symbol": "US500",
+      "tradingview_ticker": "FOREXCOM:SPX500",
+      "alt_tickers": ["TVC:SPX", "CME:ES1!", "OANDA:SPX500USD"],
+      "asset_class": "index",
+      "currency": "USD",
+      "pip_value": 0.25,
+      "preferred_sessions": ["New York"],
+      "priority": "primary",
+      "notes": "S&P 500. Use cash index or nearest futures. Document which feed."
+    },
+    {
+      "symbol": "US100",
+      "tradingview_ticker": "FOREXCOM:NAS100",
+      "alt_tickers": ["TVC:NDX", "CME:NQ1!", "OANDA:NAS100USD"],
+      "asset_class": "index",
+      "currency": "USD",
+      "pip_value": 0.25,
+      "preferred_sessions": ["New York"],
+      "priority": "primary",
+      "notes": "Nasdaq 100. Higher volatility than US500. EMA Pullback priority."
+    },
+    {
+      "symbol": "EURUSD",
+      "tradingview_ticker": "OANDA:EURUSD",
+      "alt_tickers": ["FOREXCOM:EURUSD", "FXCM:EURUSD", "FX:EURUSD"],
+      "asset_class": "forex_major",
+      "currency": "USD",
+      "pip_value": 0.0001,
+      "preferred_sessions": ["London", "London_NY_overlap"],
+      "priority": "primary",
+      "notes": "Highest liquidity forex pair. Low spread. VWAP reversion candidate."
+    },
+    {
+      "symbol": "GBPUSD",
+      "tradingview_ticker": "OANDA:GBPUSD",
+      "alt_tickers": ["FOREXCOM:GBPUSD", "FXCM:GBPUSD", "FX:GBPUSD"],
+      "asset_class": "forex_major",
+      "currency": "USD",
+      "pip_value": 0.0001,
+      "preferred_sessions": ["London", "London_NY_overlap"],
+      "priority": "secondary",
+      "notes": "Higher volatility than EURUSD. Good breakout candidate."
+    },
+    {
+      "symbol": "USDJPY",
+      "tradingview_ticker": "OANDA:USDJPY",
+      "alt_tickers": ["FOREXCOM:USDJPY", "FXCM:USDJPY", "FX:USDJPY"],
+      "asset_class": "forex_major",
+      "currency": "JPY",
+      "pip_value": 0.01,
+      "preferred_sessions": ["Tokyo", "London_NY_overlap"],
+      "priority": "secondary",
+      "notes": "Different volatility profile. Cross-market robustness check."
+    }
+  ]
+}

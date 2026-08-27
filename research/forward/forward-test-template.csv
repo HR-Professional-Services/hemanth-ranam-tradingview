@@ -1,0 +1,2 @@
+date,time,strategy,symbol,timeframe,direction,signal_price,planned_SL,planned_TP,signal_quality,market_regime,session,actual_fill_price,result,pnl_pct,R_multiple,notes
+2026-08-28,09:32:00,HR_EMA_Pullback_Pro,XAUUSD,5M,LONG,2488.50,2484.60,2494.60,7/8,Trending Bull,London,,NOT YET TAKEN,,, Example row only - delete before use
