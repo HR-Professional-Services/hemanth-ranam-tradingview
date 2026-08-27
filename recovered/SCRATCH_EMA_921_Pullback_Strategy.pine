@@ -1,0 +1,101 @@
+//@version=5
+strategy("9-21 EMA Pullback PRO Strategy", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=1, commission_type=strategy.commission.percent, commission_value=0.01)
+
+// ==========================================
+// 1. INPUT PARAMETERS
+// ==========================================
+emaFastLen    = input.int(9, title="Fast EMA Period", group="EMA Settings")
+emaSlowLen    = input.int(21, title="Slow EMA Period", group="EMA Settings")
+emaTrend5MLen = input.int(200, title="5M Trend EMA Period", group="EMA Settings")
+use1HFilter   = input.bool(true, title="Enable 1H 200 EMA Filter", group="Trend Filters")
+
+slBuffer      = input.float(0.30, title="SL Buffer ($ / Pips)", group="Risk & Exits")
+rrRatio       = input.float(2.0, title="Target Risk-to-Reward Ratio", group="Risk & Exits")
+maxTradesDay  = input.int(3, title="Max Trades Per Day", group="Risk & Exits")
+
+useSession    = input.bool(true, title="Filter Trading Hours (London/NY)", group="Session Filter")
+sessionStr    = input.session("0700-2000:23456", title="Allowed Trading Session (UTC)", group="Session Filter")
+
+// ==========================================
+// 2. INDICATOR CALCULATIONS
+// ==========================================
+ema9   = ta.ema(close, emaFastLen)
+ema21  = ta.ema(close, emaSlowLen)
+ema200 = ta.ema(close, emaTrend5MLen)
+
+// 1H 200 EMA (12x 5m bars)
+ema200_1H = request.security(syminfo.tickerid, "60", ta.ema(close, 200), lookahead=barmerge.lookahead_on)
+
+// Session check
+inSession = not useSession or not na(time(timeframe.period, sessionStr))
+
+// Trend Alignment
+is5MBullish = close > ema200
+is5MBearish = close < ema200
+is1HBullish = not use1HFilter or (close > ema200_1H)
+is1HBearish = not use1HFilter or (close < ema200_1H)
+
+// Crossover Signals
+bullishCross = ta.crossover(ema9, ema21)
+bearishCross = ta.crossunder(ema9, ema21)
+
+// Pullback to Value Zone (low/high enters EMA 9-21 zone)
+buyPullback  = (low <= ema9 or low <= ema21) and (close >= ema21)
+sellPullback = (high >= ema9 or high >= ema21) and (close <= ema21)
+
+// Confirmation Candle
+bullishConfirm = (close > open) and (close > (high + low) / 2.0)
+bearishConfirm = (close < open) and (close < (high + low) / 2.0)
+
+// Entry Conditions
+buySignal  = inSession and is5MBullish and is1HBullish and (bullishCross or buyPullback) and bullishConfirm
+sellSignal = inSession and is5MBearish and is1HBearish and (bearishCross or sellPullback) and bearishConfirm
+
+// Emergency Exit
+bearishExit = ta.crossunder(ema9, ema21)
+bullishExit = ta.crossover(ema9, ema21)
+
+// ==========================================
+// 3. STRATEGY EXECUTION & BACKTEST LOGIC
+// ==========================================
+var float entryPrice = na
+var float stopLoss   = na
+var float takeProfit = na
+
+if (buySignal and strategy.position_size == 0)
+    stopLoss   := math.min(low, ema21) - slBuffer
+    riskDist   = close - stopLoss
+    takeProfit := close + (riskDist * rrRatio)
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Exit Long", "Long", stop=stopLoss, limit=takeProfit)
+
+if (sellSignal and strategy.position_size == 0)
+    stopLoss   := math.max(high, ema21) + slBuffer
+    riskDist   = stopLoss - close
+    takeProfit := close - (riskDist * rrRatio)
+    strategy.entry("Short", strategy.short)
+    strategy.exit("Exit Short", "Short", stop=stopLoss, limit=takeProfit)
+
+// Emergency exit on opposite EMA crossover
+if (strategy.position_size > 0 and bearishExit)
+    strategy.close("Long", comment="EMA Exit")
+
+if (strategy.position_size < 0 and bullishExit)
+    strategy.close("Short", comment="EMA Exit")
+
+// ==========================================
+// 4. CHART PLOTS & VISUAL OVERLAYS
+// ==========================================
+plot(ema9, color=color.rgb(0, 188, 212), title="EMA 9 (Fast)", linewidth=2)
+plot(ema21, color=color.rgb(255, 152, 0), title="EMA 21 (Slow)", linewidth=2)
+plot(ema200, color=color.rgb(156, 39, 176), title="EMA 200 (5M Trend)", linewidth=3)
+plot(ema200_1H, color=color.rgb(233, 30, 99), title="EMA 200 (1H Macro)", linewidth=2, style=plot.style_linebr)
+
+// Highlight Value Zone between 9 and 21 EMA
+p9  = plot(ema9, display=display.none)
+p21 = plot(ema21, display=display.none)
+fill(p9, p21, color=ema9 > ema21 ? color.new(color.green, 85) : color.new(color.red, 85), title="Value Zone Highlight")
+
+// Entry Arrows on Chart
+plotshape(buySignal and strategy.position_size[1] == 0, title="BUY Signal Arrow", style=shape.triangleup, location=location.belowbar, color=color.green, size=size.small, text="BUY 9-21")
+plotshape(sellSignal and strategy.position_size[1] == 0, title="SELL Signal Arrow", style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small, text="SELL 9-21")

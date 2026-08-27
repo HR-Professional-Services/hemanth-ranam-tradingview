@@ -1,0 +1,243 @@
+//@version=5
+indicator("Hemanth Ranam — Multi-Strategy Trading Engine", shorttitle="HR Trading Engine", overlay=true, max_labels_count=500, max_lines_count=500)
+
+// =============================================================================
+// HEMANTH RANAM — INSTITUTIONAL MULTI-STRATEGY TRADING SYSTEM (PINE SCRIPT V5)
+// Architecture:
+// 1. Five Strategy Frameworks (EMA Pullback, Breakout+Retest, Structure, VWAP, Momentum)
+// 2. Multi-Timeframe Trend & Alignment Filters
+// 3. Dynamic Risk/Reward Levels (Stop Loss, TP1, TP2 based on ATR)
+// 4. Compact On-Chart Telemetry HUD Dashboard
+// 5. Configurable JSON Webhook Alert System for Downstream Automation
+// =============================================================================
+
+// --- 1. GENERAL & STRATEGY SELECTION INPUTS ---
+grp_strat = "Strategy Selection & General Settings"
+strat_mode = input.string("EMA Pullback", "Active Strategy Framework", options=["EMA Pullback", "Breakout + Retest", "Market Structure", "VWAP Mean Reversion", "Momentum Expansion"], group=grp_strat)
+show_signals = input.bool(true, "Show Buy / Sell Chart Signals", group=grp_strat)
+show_tp_sl = input.bool(true, "Plot Entry, SL & TP Levels", group=grp_strat)
+show_dashboard = input.bool(true, "Display On-Chart HUD Dashboard", group=grp_strat)
+dashboard_pos = input.string("Top Right", "Dashboard Position", options=["Top Right", "Bottom Right", "Top Left", "Bottom Left"], group=grp_strat)
+
+// --- 2. EMA CONFIGURATION ---
+grp_ema = "EMA & Trend Parameters"
+fast_len = input.int(9, "Fast EMA Length", group=grp_ema)
+mid_len  = input.int(21, "Mid EMA Length", group=grp_ema)
+slow_len = input.int(200, "Baseline Trend EMA (200)", group=grp_ema)
+htf_trend_filter = input.bool(true, "Enable 1H Higher Timeframe Trend Filter", group=grp_ema)
+htf_timeframe = input.timeframe("60", "Higher Timeframe", group=grp_ema)
+
+// --- 3. RISK MANAGEMENT & ATR INPUTS ---
+grp_risk = "Risk Management & Targets"
+atr_len = input.int(14, "ATR Length", group=grp_risk)
+sl_atr_mult = input.float(1.5, "Stop Loss ATR Multiplier", step=0.1, group=grp_risk)
+tp1_rr_mult = input.float(1.5, "Take Profit 1 (R:R)", step=0.1, group=grp_risk)
+tp2_rr_mult = input.float(2.5, "Take Profit 2 (R:R)", step=0.1, group=grp_risk)
+
+// --- 4. SESSION FILTER ---
+grp_sess = "Market Session Filter"
+use_session_filter = input.bool(false, "Filter By Trading Session", group=grp_sess)
+session_hours = input.session("0700-1700:23456", "Active Trading Session (UTC)", group=grp_sess)
+
+// =============================================================================
+// CORE INDICATOR CALCULATIONS
+// =============================================================================
+ema9   = ta.ema(close, fast_len)
+ema21  = ta.ema(close, mid_len)
+ema200 = ta.ema(close, slow_len)
+atr    = ta.atr(atr_len)
+
+// Higher Timeframe Trend
+htf_close = request.security(syminfo.tickerid, htf_timeframe, close, barmerge.gaps_off, barmerge.lookahead_off)
+htf_ema200 = request.security(syminfo.tickerid, htf_timeframe, ta.ema(close, slow_len), barmerge.gaps_off, barmerge.lookahead_off)
+htf_bullish = not htf_trend_filter or (htf_close > htf_ema200)
+htf_bearish = not htf_trend_filter or (htf_close < htf_ema200)
+
+// Session Active Check
+in_session = not use_session_filter or not na(time(timeframe.period, session_hours))
+
+// Plot Baseline EMAs
+plot(ema9, "EMA 9 (Fast)", color=color.new(#60a5fa, 20), linewidth=1)
+plot(ema21, "EMA 21 (Mid)", color=color.new(#2563eb, 0), linewidth=2)
+plot(ema200, "EMA 200 (Trend Baseline)", color=color.new(#f59e0b, 0), linewidth=2)
+
+// =============================================================================
+// STRATEGY 1: EMA PULLBACK / TREND CONTINUATION
+// =============================================================================
+ema_bull_align = (ema9 > ema21) and (ema21 > ema200) and (close > ema200)
+ema_bear_align = (ema9 < ema21) and (ema21 < ema200) and (close < ema200)
+
+// Pullback into EMA 9/21 value zone
+pullback_buy_zone = (low <= ema9 or low <= ema21) and (close >= ema21)
+pullback_sell_zone = (high >= ema9 or high >= ema21) and (close <= ema21)
+
+// Trigger Confirmation Candle
+bull_trigger = close > open and close > high[1]
+bear_trigger = close < open and close < low[1]
+
+sig_ema_buy  = ema_bull_align and pullback_buy_zone and bull_trigger and htf_bullish and in_session
+sig_ema_sell = ema_bear_align and pullback_sell_zone and bear_trigger and htf_bearish and in_session
+
+// =============================================================================
+// STRATEGY 2: BREAKOUT + RETEST
+// =============================================================================
+range_high = ta.highest(high, 20)[1]
+range_low  = ta.lowest(low, 20)[1]
+breakout_up   = ta.crossover(close, range_high)
+breakout_down = ta.crossunder(close, range_low)
+
+retest_buy  = ta.crossover(close, ema21) and (close > range_high[1]) and htf_bullish and in_session
+retest_sell = ta.crossunder(close, ema21) and (close < range_low[1]) and htf_bearish and in_session
+
+// =============================================================================
+// STRATEGY 3: MARKET STRUCTURE CONTINUATION (SWING HH/HL & LH/LL)
+// =============================================================================
+swing_high = ta.pivothigh(high, 5, 2)
+swing_low  = ta.pivotlow(low, 5, 2)
+var float last_sh = na
+var float last_sl = na
+if not na(swing_high)
+    last_sh := swing_high
+if not na(swing_low)
+    last_sl := swing_low
+
+struct_buy  = ta.crossover(close, last_sh) and (close > ema200) and in_session
+struct_sell = ta.crossunder(close, last_sl) and (close < ema200) and in_session
+
+// =============================================================================
+// STRATEGY 4: VWAP MEAN REVERSION
+// =============================================================================
+vwap_val = ta.vwap(hlc3)
+vwap_dev = ta.stdev(close, 20)
+vwap_upper = vwap_val + (2.0 * vwap_dev)
+vwap_lower = vwap_val - (2.0 * vwap_dev)
+
+vwap_buy  = ta.crossover(close, vwap_lower) and (ta.rsi(close, 14) < 35) and in_session
+vwap_sell = ta.crossunder(close, vwap_upper) and (ta.rsi(close, 14) > 65) and in_session
+
+// =============================================================================
+// STRATEGY 5: MOMENTUM VOLATILITY EXPANSION (SQUEEZE BREAKOUT)
+// =============================================================================
+bb_basis = ta.sma(close, 20)
+bb_dev = 2.0 * ta.stdev(close, 20)
+bb_upper = bb_basis + bb_dev
+bb_lower = bb_basis - bb_dev
+kc_basis = ta.ema(close, 20)
+kc_range = ta.atr(20) * 1.5
+kc_upper = kc_basis + kc_range
+kc_lower = kc_basis - kc_range
+
+squeeze_on = (bb_lower > kc_lower) and (bb_upper < kc_upper)
+squeeze_release = squeeze_on[1] and not squeeze_on
+
+mom_buy  = squeeze_release and (close > bb_upper) and (ema9 > ema21) and in_session
+mom_sell = squeeze_release and (close < bb_lower) and (ema9 < ema21) and in_session
+
+// =============================================================================
+// ACTIVE STRATEGY SELECTION & SIGNAL RESOLUTION
+// =============================================================================
+bool final_buy  = false
+bool final_sell = false
+
+if strat_mode == "EMA Pullback"
+    final_buy  := sig_ema_buy
+    final_sell := sig_ema_sell
+else if strat_mode == "Breakout + Retest"
+    final_buy  := retest_buy
+    final_sell := retest_sell
+else if strat_mode == "Market Structure"
+    final_buy  := struct_buy
+    final_sell := struct_sell
+else if strat_mode == "VWAP Mean Reversion"
+    final_buy  := vwap_buy
+    final_sell := vwap_sell
+else if strat_mode == "Momentum Expansion"
+    final_buy  := mom_buy
+    final_sell := mom_sell
+
+// Prevent consecutive duplicated signals
+var int last_signal_dir = 0 // 1: Buy, -1: Sell
+buy_trigger  = final_buy and (last_signal_dir != 1)
+sell_trigger = final_sell and (last_signal_dir != -1)
+
+if buy_trigger
+    last_signal_dir := 1
+if sell_trigger
+    last_signal_dir := -1
+
+// Dynamic Levels Calculation
+var float active_entry = na
+var float active_sl    = na
+var float active_tp1   = na
+var float active_tp2   = na
+
+if buy_trigger
+    active_entry := close
+    active_sl    := close - (atr * sl_atr_mult)
+    risk_pts      = active_entry - active_sl
+    active_tp1   := active_entry + (risk_pts * tp1_rr_mult)
+    active_tp2   := active_entry + (risk_pts * tp2_rr_mult)
+
+if sell_trigger
+    active_entry := close
+    active_sl    := close + (atr * sl_atr_mult)
+    risk_pts      = active_sl - active_entry
+    active_tp1   := active_entry - (risk_pts * tp1_rr_mult)
+    active_tp2   := active_entry - (risk_pts * tp2_rr_mult)
+
+// =============================================================================
+// VISUAL LABELS & TARGET PLOTS
+// =============================================================================
+if show_signals and buy_trigger
+    label.new(bar_index, low - (atr * 0.5), "BUY\n" + strat_mode, color=#2563eb, textcolor=color.white, style=label.style_label_up, size=size.small)
+
+if show_signals and sell_trigger
+    label.new(bar_index, high + (atr * 0.5), "SELL\n" + strat_mode, color=#dc2626, textcolor=color.white, style=label.style_label_down, size=size.small)
+
+// =============================================================================
+// COMPACT ON-CHART HUD DASHBOARD
+// =============================================================================
+if show_dashboard and barstate.islast
+    table_pos = dashboard_pos == "Top Right" ? position.top_right : dashboard_pos == "Bottom Right" ? position.bottom_right : dashboard_pos == "Top Left" ? position.top_left : position.bottom_left
+    var table hud = table.new(table_pos, 2, 7, bgcolor=color.new(#0f172a, 15), border_color=color.new(#334155, 30), border_width=1)
+    
+    // Header
+    table.cell(hud, 0, 0, "HEMANTH RANAM", bgcolor=color.new(#1e293b, 10), text_color=#38bdf8, text_size=size.small)
+    table.cell(hud, 1, 0, "TRADING SYSTEM", bgcolor=color.new(#1e293b, 10), text_color=color.white, text_size=size.small)
+    
+    // Strategy
+    table.cell(hud, 0, 1, "Strategy", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 1, strat_mode, text_color=color.white, text_size=size.tiny)
+    
+    // HTF Trend
+    trend_txt = htf_bullish ? "BULLISH" : "BEARISH"
+    trend_col = htf_bullish ? #22c55e : #ef4444
+    table.cell(hud, 0, 2, "1H Trend", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 2, trend_txt, text_color=trend_col, text_size=size.tiny)
+    
+    // Structure
+    struct_txt = ema_bull_align ? "ALIGNED UP" : ema_bear_align ? "ALIGNED DOWN" : "NEUTRAL"
+    table.cell(hud, 0, 3, "EMA Structure", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 3, struct_txt, text_color=color.white, text_size=size.tiny)
+    
+    // Volatility (ATR)
+    table.cell(hud, 0, 4, "ATR (14)", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 4, str.tostring(atr, "#.##"), text_color=color.white, text_size=size.tiny)
+    
+    // Active Signal Status
+    sig_status = last_signal_dir == 1 ? "LONG" : last_signal_dir == -1 ? "SHORT" : "SEARCHING"
+    sig_color = last_signal_dir == 1 ? #22c55e : last_signal_dir == -1 ? #ef4444 : #94a3b8
+    table.cell(hud, 0, 5, "Status", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 5, sig_status, text_color=sig_color, text_size=size.tiny)
+
+// =============================================================================
+// STANDARDIZED WEBHOOK ALERT DISPATCH
+// =============================================================================
+alert_payload_buy = '{"brand":"Hemanth Ranam","system":"TradingEngine","strategy":"' + strat_mode + '","symbol":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","signal":"BUY","entry":' + str.tostring(close, "#.##") + ',"stop_loss":' + str.tostring(active_sl, "#.##") + ',"take_profit_1":' + str.tostring(active_tp1, "#.##") + ',"timestamp":' + str.tostring(time) + '}'
+alert_payload_sell = '{"brand":"Hemanth Ranam","system":"TradingEngine","strategy":"' + strat_mode + '","symbol":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","signal":"SELL","entry":' + str.tostring(close, "#.##") + ',"stop_loss":' + str.tostring(active_sl, "#.##") + ',"take_profit_1":' + str.tostring(active_tp1, "#.##") + ',"timestamp":' + str.tostring(time) + '}'
+
+if buy_trigger
+    alert(alert_payload_buy, alert.freq_once_per_bar_close)
+
+if sell_trigger
+    alert(alert_payload_sell, alert.freq_once_per_bar_close)

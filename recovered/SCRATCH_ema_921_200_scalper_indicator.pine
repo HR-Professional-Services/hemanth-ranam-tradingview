@@ -1,0 +1,646 @@
+//@version=6
+indicator("9-21-200 EMA Scalper Engine [PRO]", overlay=true, max_labels_count=500, max_boxes_count=500, max_lines_count=500)
+
+// ======================================================
+// STRATEGY & ENGINE INPUTS
+// ======================================================
+var string G_EMA      = "1. EMA Settings"
+var string G_HTF      = "2. Higher Timeframe Trend Filter (1H)"
+var string G_PULL     = "3. EMA Pullback & Entry Confirmation"
+var string G_MS       = "4. Market Structure Filter"
+var string G_REGIME   = "5. Market Regime & Risk Filters"
+var string G_SCORE    = "6. Quality Scoring & Signal Grading"
+var string G_SESSIONS = "7. Session Engine & Preferred Hours"
+var string G_DASH     = "8. Terminal Dashboard Settings"
+var string G_VISUAL   = "9. Visual Elements & Overlays"
+
+// --- 1. EMA Settings ---
+ema9Len   = input.int(9, title="EMA Fast (9)", minval=1, group=G_EMA)
+ema21Len  = input.int(21, title="EMA Medium (21)", minval=1, group=G_EMA)
+ema200Len = input.int(200, title="EMA Slow (200)", minval=1, group=G_EMA)
+
+// --- 2. HTF Filter ---
+useHtfFilter = input.bool(true, title="Enable 1H HTF Trend Filter", group=G_HTF)
+htfTF        = input.timeframe("60", title="Higher Timeframe", group=G_HTF)
+htfEmaLen    = input.int(200, title="HTF EMA Period", minval=1, group=G_HTF)
+
+// --- 3. Pullback & Confirmation ---
+pbZoneMode            = input.string("EMA 9-21 Zone", title="Pullback Target Zone", options=["EMA 9-21 Zone", "EMA 9 Retest", "EMA 21 Retest"], group=G_PULL)
+requireCloseBeyondEma = input.bool(true, title="Require Close Beyond EMA 9", group=G_PULL)
+useEngulfing          = input.bool(true, title="Require Engulfing Candle", group=G_PULL)
+useWickRejection      = input.bool(false, title="Require Rejection Wick", group=G_PULL)
+minWickPct            = input.float(35.0, title="Min Rejection Wick % of Range", minval=10.0, maxval=80.0, step=5.0, group=G_PULL)
+useStrongBody         = input.bool(false, title="Require Strong Momentum Body", group=G_PULL)
+minBodyPct            = input.float(55.0, title="Min Candle Body % of Range", minval=10.0, maxval=90.0, step=5.0, group=G_PULL)
+
+// --- 4. Market Structure Filter ---
+useMsFilter          = input.bool(false, title="Enable Market Structure Filter", group=G_MS)
+msPivotLen           = input.int(5, title="Pivot Structure Lookback", minval=2, maxval=50, group=G_MS)
+requireBreakOfPivot  = input.bool(false, title="Require Break of Recent Pivot", group=G_MS)
+
+// --- 5. Market Regime & Risk ---
+useChopFilter = input.bool(true, title="Enable Chop Filter (Compression)", group=G_REGIME)
+chopThreshold = input.float(0.06, title="Min EMA 9/21 Gap (ATR Multiplier)", minval=0.01, step=0.01, group=G_REGIME)
+useExtFilter  = input.bool(true, title="Enable Overextension Filter", group=G_REGIME)
+maxExtAtr     = input.float(2.5, title="Max Price Distance to EMA 9 (ATR Multiplier)", minval=1.0, step=0.1, group=G_REGIME)
+slopeLookback = input.int(3, title="EMA Slope Lookback (Bars)", minval=1, maxval=10, group=G_REGIME)
+
+// --- 6. Quality Scoring & Signal Grading ---
+minEntryScore   = input.int(70, title="Minimum Entry Quality Score (0-100)", minval=50, maxval=95, step=5, group=G_SCORE)
+minSignalGrade  = input.string("A and Above", title="Minimum Signal Grade Allowed", options=["A+ Only", "A and Above", "B and Above", "All Signals"], group=G_SCORE)
+showSignalScore = input.bool(true, title="Show Quality Score on Chart Label", group=G_SCORE)
+showSignalGrade = input.bool(true, title="Show Grade on Chart Label", group=G_SCORE)
+
+// --- 7. Session Engine ---
+prefSessions = input.string("London + NY", title="Preferred Trading Window", options=["All Active Sessions", "London Only", "New York Only", "London + NY"], group=G_SESSIONS)
+
+// Session A (New York)
+show_sesa   = input.bool(true, '', inline = 'sesa', group = 'Session A (New York)')
+sesa_txt    = input.string('New York', '', inline = 'sesa', group = 'Session A (New York)')
+sesa_ses    = input.session('1300-2200', '', inline = 'sesa', group = 'Session A (New York)')
+sesa_css    = input.color(#ff5d00, '', inline = 'sesa', group = 'Session A (New York)')
+sesa_range  = input.bool(true, 'Range', inline = 'sesa_overlays', group = 'Session A (New York)')
+sesa_tl     = input.bool(false, 'Trendline', inline = 'sesa_overlays', group = 'Session A (New York)')
+sesa_avg    = input.bool(false, 'Mean', inline = 'sesa_overlays', group = 'Session A (New York)')
+sesa_vwap   = input.bool(false, 'VWAP', inline = 'sesa_overlays', group = 'Session A (New York)')
+sesa_maxmin = input.bool(false, 'Max/Min', inline = 'sesa_overlays', group = 'Session A (New York)')
+
+// Session B (London)
+show_sesb   = input.bool(true, '', inline = 'sesb', group = 'Session B (London)')
+sesb_txt    = input.string('London', '', inline = 'sesb', group = 'Session B (London)')
+sesb_ses    = input.session('0700-1600', '', inline = 'sesb', group = 'Session B (London)')
+sesb_css    = input.color(#2157f3, '', inline = 'sesb', group = 'Session B (London)')
+sesb_range  = input.bool(true, 'Range', inline = 'sesb_overlays', group = 'Session B (London)')
+sesb_tl     = input.bool(false, 'Trendline', inline = 'sesb_overlays', group = 'Session B (London)')
+sesb_avg    = input.bool(false, 'Mean', inline = 'sesb_overlays', group = 'Session B (London)')
+sesb_vwap   = input.bool(false, 'VWAP', inline = 'sesb_overlays', group = 'Session B (London)')
+sesb_maxmin = input.bool(false, 'Max/Min', inline = 'sesb_overlays', group = 'Session B (London)')
+
+// Session C (Tokyo)
+show_sesc   = input.bool(true, '', inline = 'sesc', group = 'Session C (Tokyo)')
+sesc_txt    = input.string('Tokyo', '', inline = 'sesc', group = 'Session C (Tokyo)')
+sesc_ses    = input.session('0000-0900', '', inline = 'sesc', group = 'Session C (Tokyo)')
+sesc_css    = input.color(#e91e63, '', inline = 'sesc', group = 'Session C (Tokyo)')
+sesc_range  = input.bool(true, 'Range', inline = 'sesc_overlays', group = 'Session C (Tokyo)')
+sesc_tl     = input.bool(false, 'Trendline', inline = 'sesc_overlays', group = 'Session C (Tokyo)')
+sesc_avg    = input.bool(false, 'Mean', inline = 'sesc_overlays', group = 'Session C (Tokyo)')
+sesc_vwap   = input.bool(false, 'VWAP', inline = 'sesc_overlays', group = 'Session C (Tokyo)')
+sesc_maxmin = input.bool(false, 'Max/Min', inline = 'sesc_overlays', group = 'Session C (Tokyo)')
+
+// Session D (Sydney)
+show_sesd   = input.bool(true, '', inline = 'sesd', group = 'Session D (Sydney)')
+sesd_txt    = input.string('Sydney', '', inline = 'sesd', group = 'Session D (Sydney)')
+sesd_ses    = input.session('2100-0600', '', inline = 'sesd', group = 'Session D (Sydney)')
+sesd_css    = input.color(#ffeb3b, '', inline = 'sesd', group = 'Session D (Sydney)')
+sesd_range  = input.bool(true, 'Range', inline = 'sesd_overlays', group = 'Session D (Sydney)')
+sesd_tl     = input.bool(false, 'Trendline', inline = 'sesd_overlays', group = 'Session D (Sydney)')
+sesd_avg    = input.bool(false, 'Mean', inline = 'sesd_overlays', group = 'Session D (Sydney)')
+sesd_vwap   = input.bool(false, 'VWAP', inline = 'sesd_overlays', group = 'Session D (Sydney)')
+sesd_maxmin = input.bool(false, 'Max/Min', inline = 'sesd_overlays', group = 'Session D (Sydney)')
+
+// Timezone & Ranges
+tz_incr      = input.int(0, 'UTC Offset (+/- Hours)', group = 'Timezone')
+use_exchange = input.bool(false, 'Use Chart Exchange Timezone', group = 'Timezone')
+bg_transp    = input.float(90.0, 'Session Box Transparency', group = 'Ranges Settings')
+show_outline = input.bool(true, 'Session Box Outline', group = 'Ranges Settings')
+show_txt     = input.bool(true, 'Session Label', group = 'Ranges Settings')
+
+// --- 8. Dashboard ---
+show_dash     = input.bool(true, 'Show Terminal Dashboard', group = G_DASH)
+advanced_dash = input.bool(true, 'Show Advanced Metrics', group = G_DASH)
+dash_loc      = input.string('Top Right', 'Dashboard Location', options = ['Top Right', 'Bottom Right', 'Bottom Left'], group = G_DASH)
+text_size     = input.string('Small', 'Dashboard Size', options = ['Tiny', 'Small', 'Normal'], group = G_DASH)
+
+// --- 9. Visuals & Overlays ---
+showEma9       = input.bool(true, "Show EMA 9 Line", group=G_VISUAL)
+showEma21      = input.bool(true, "Show EMA 21 Line", group=G_VISUAL)
+showEma200     = input.bool(true, "Show EMA 200 Line", group=G_VISUAL)
+showEmaZone    = input.bool(true, "Show EMA Pullback Zone Cloud", group=G_VISUAL)
+show_ses_div   = input.bool(false, 'Show Session Divider Line', group = G_VISUAL)
+show_day_div   = input.bool(true, 'Show Daily Divider Line', group = G_VISUAL)
+
+// ======================================================
+// CORE ENGINE MATHEMATICS & CALCULATIONS
+// ======================================================
+n = bar_index
+tf = timeframe.period
+
+// Timezone Calculation
+var string tz = use_exchange ? syminfo.timezone : str.format('UTC{0}{1}', tz_incr >= 0 ? '+' : '-', math.abs(tz_incr))
+
+// Active Session Indicators
+is_sesa = math.sign(nz(time(tf, sesa_ses, tz)))
+is_sesb = math.sign(nz(time(tf, sesb_ses, tz)))
+is_sesc = math.sign(nz(time(tf, sesc_ses, tz)))
+is_sesd = math.sign(nz(time(tf, sesd_ses, tz)))
+
+anySessionActive = (is_sesa > 0) or (is_sesb > 0) or (is_sesc > 0) or (is_sesd > 0)
+
+// Preferred Session Logic
+sessionAllowed = switch prefSessions
+    "London Only"          => is_sesb > 0
+    "New York Only"        => is_sesa > 0
+    "London + NY"          => (is_sesa > 0) or (is_sesb > 0)
+    "All Active Sessions"  => anySessionActive
+    => true
+
+activeSessionName = is_sesb > 0 ? "London" : is_sesa > 0 ? "New York" : is_sesc > 0 ? "Tokyo" : is_sesd > 0 ? "Sydney" : "Off-Hours"
+
+// Local Technical Indicators
+ema9   = ta.ema(close, ema9Len)
+ema21  = ta.ema(close, ema21Len)
+ema200 = ta.ema(close, ema200Len)
+atr    = ta.atr(14)
+
+// Safe Non-Repainting 1H HTF Security Query (Calculated on closed HTF bars)
+float htf200   = request.security(syminfo.tickerid, htfTF, ta.ema(close, htfEmaLen)[1], barmerge.gaps_off, barmerge.lookahead_off)
+float htfClose = request.security(syminfo.tickerid, htfTF, close[1], barmerge.gaps_off, barmerge.lookahead_off)
+
+htfBull = not useHtfFilter or (htfClose > htf200)
+htfBear = not useHtfFilter or (htfClose < htf200)
+htfStateText = not useHtfFilter ? "OFF" : (htfClose > htf200 ? "BULL" : htfClose < htf200 ? "BEAR" : "NEUTRAL")
+
+// Visual EMA Plots
+plot(showEma9 ? ema9 : na, color=#2196f3, linewidth=2, title="EMA 9")
+plot(showEma21 ? ema21 : na, color=#ff5252, linewidth=2, title="EMA 21")
+plot(showEma200 ? ema200 : na, color=#ffffff, linewidth=3, title="EMA 200")
+
+pEma9  = plot(showEmaZone ? ema9 : na, display=display.none, title="EMA 9 Band")
+pEma21 = plot(showEmaZone ? ema21 : na, display=display.none, title="EMA 21 Band")
+fill(pEma9, pEma21, color=ema9 > ema21 ? color.new(color.green, 85) : color.new(color.red, 85), title="EMA Zone Cloud")
+
+// ======================================================
+// TREND & HEALTH ENGINE
+// ======================================================
+// EMA Slopes
+ema9Slope  = (ema9 - ema9[slopeLookback]) / slopeLookback
+ema21Slope = (ema21 - ema21[slopeLookback]) / slopeLookback
+
+// Stacking & Alignment
+bullStack = ema9 > ema21 and ema21 > ema200
+bearStack = ema9 < ema21 and ema21 < ema200
+
+bullTrend = close > ema200 and ema9 > ema21
+bearTrend = close < ema200 and ema9 < ema21
+
+// 5M Dedicated Trend State
+strongBull5M = bullStack and close > ema9 and ema9Slope > 0 and ema21Slope > 0
+strongBear5M = bearStack and close < ema9 and ema9Slope < 0 and ema21Slope < 0
+
+trend5MText = strongBull5M ? "STRONG BULL" : bullTrend ? "BULL" : strongBear5M ? "STRONG BEAR" : bearTrend ? "BEAR" : "NEUTRAL"
+
+// EMA Gap & ATR Metrics
+emaGap = math.abs(ema9 - ema21)
+gapRatio = atr > 0 ? (emaGap / atr) : 0.0
+
+// Chop & Overextension Detection
+isChoppy = useChopFilter and (gapRatio < chopThreshold or (ema9Slope == 0 and ema21Slope == 0))
+distEma9 = math.abs(close - ema9)
+isExtended = useExtFilter and (atr > 0 and (distEma9 / atr) > maxExtAtr)
+
+marketRegimeText = isChoppy ? "CHOPPY" : isExtended ? "EXTENDED" : "TRENDING"
+
+// EMA Health Score Calculation (0 - 100)
+float slopeScore = (bullTrend and ema9Slope > 0 and ema21Slope > 0) or (bearTrend and ema9Slope < 0 and ema21Slope < 0) ? 30.0 : (ema9Slope != 0 or ema21Slope != 0 ? 15.0 : 0.0)
+float stackScore = bullStack or bearStack ? 30.0 : (bullTrend or bearTrend ? 20.0 : 0.0)
+float gapScore   = gapRatio >= 0.15 ? 25.0 : gapRatio >= 0.08 ? 18.0 : gapRatio >= 0.04 ? 10.0 : 0.0
+float posScore   = (bullTrend and low > ema200) or (bearTrend and high < ema200) ? 15.0 : 5.0
+
+healthScore = math.min(100.0, slopeScore + stackScore + gapScore + posScore)
+healthText  = healthScore >= 90 ? "Strong" : healthScore >= 75 ? "Healthy" : healthScore >= 60 ? "Developing" : healthScore >= 40 ? "Neutral" : "Weak"
+
+// ======================================================
+// PULLBACK & CANDLE CONFIRMATION ENGINE
+// ======================================================
+// Zone Interaction
+inZoneBull = switch pbZoneMode
+    "EMA 9-21 Zone" => low <= math.max(ema9, ema21) and low >= math.min(ema9, ema21)
+    "EMA 9 Retest"  => low <= ema9 and close > ema21
+    "EMA 21 Retest" => low <= ema21 and close >= ema21
+    => low <= ema9
+
+inZoneBear = switch pbZoneMode
+    "EMA 9-21 Zone" => high >= math.min(ema9, ema21) and high <= math.max(ema9, ema21)
+    "EMA 9 Retest"  => high >= ema9 and close < ema21
+    "EMA 21 Retest" => high >= ema21 and close <= ema21
+    => high >= ema9
+
+// Candlestick Pattern Confirmation
+candleRange = math.max(high - low, syminfo.mintick)
+bullishEngulfing = close > open and close[1] < open[1] and close > high[1]
+bearishEngulfing = close < open and close[1] > open[1] and close < low[1]
+
+lowerWick = math.min(open, close) - low
+upperWick = high - math.max(open, close)
+
+bullWickRejection = (lowerWick / candleRange) >= (minWickPct / 100.0)
+bearWickRejection = (upperWick / candleRange) >= (minWickPct / 100.0)
+
+candleBody = math.abs(close - open)
+bullStrongBody = close > open and (candleBody / candleRange) >= (minBodyPct / 100.0)
+bearStrongBody = close < open and (candleBody / candleRange) >= (minBodyPct / 100.0)
+
+// Combined Confirmation Flags
+bullCandleConfirmed = (not requireCloseBeyondEma or close > ema9) and 
+                       (not useEngulfing or bullishEngulfing) and 
+                       (not useWickRejection or bullWickRejection) and 
+                       (not useStrongBody or bullStrongBody)
+
+bearCandleConfirmed = (not requireCloseBeyondEma or close < ema9) and 
+                       (not useEngulfing or bearishEngulfing) and 
+                       (not useWickRejection or bearWickRejection) and 
+                       (not useStrongBody or bearStrongBody)
+
+// ======================================================
+// MARKET STRUCTURE ENGINE
+// ======================================================
+ph = ta.pivothigh(high, msPivotLen, msPivotLen)
+pl = ta.pivotlow(low, msPivotLen, msPivotLen)
+
+var float lastPH = na
+var float lastPL = na
+
+if not na(ph)
+    lastPH := ph
+if not na(pl)
+    lastPL := pl
+
+msBullConfirmed = not useMsFilter or (close > nz(lastPL, low) and (not requireBreakOfPivot or close > nz(lastPH, high)))
+msBearConfirmed = not useMsFilter or (close < nz(lastPH, high) and (not requireBreakOfPivot or close < nz(lastPL, low)))
+
+// ======================================================
+// ENTRY QUALITY SCORING & SIGNAL GENERATION
+// ======================================================
+// Compute Entry Quality Score (0 - 100)
+calcQualityScore(isLong) =>
+    float score = 0.0
+    score += (healthScore * 0.25)
+    score += (isLong ? (bullStack ? 20.0 : 12.0) : (bearStack ? 20.0 : 12.0))
+    score += (isLong ? (htfClose > htf200 ? 20.0 : 0.0) : (htfClose < htf200 ? 20.0 : 0.0))
+    score += ((isLong and bullishEngulfing) or (not isLong and bearishEngulfing) ? 15.0 : 8.0)
+    score += (isLong ? (msBullConfirmed ? 10.0 : 0.0) : (msBearConfirmed ? 10.0 : 0.0))
+    score += (sessionAllowed ? 10.0 : 0.0)
+    math.min(100.0, score)
+
+buyQualityScore  = calcQualityScore(true)
+sellQualityScore = calcQualityScore(false)
+
+getGrade(score) =>
+    score >= 90.0 ? "A+" : score >= 75.0 ? "A" : score >= 60.0 ? "B" : "C"
+
+buyGrade  = getGrade(buyQualityScore)
+sellGrade = getGrade(sellQualityScore)
+
+isGradeAllowed(grade) =>
+    switch minSignalGrade
+        "A+ Only"      => grade == "A+"
+        "A and Above"  => grade == "A+" or grade == "A"
+        "B and Above"  => grade == "A+" or grade == "A" or grade == "B"
+        "All Signals"  => true
+        => true
+
+// Signal Cooldown State Machine
+var bool waitBuy  = false
+var bool waitSell = false
+bullCross = ta.crossover(ema9, ema21)
+bearCross = ta.crossunder(ema9, ema21)
+
+if bullCross
+    waitBuy  := true
+    waitSell := false
+if bearCross
+    waitSell := true
+    waitBuy  := false
+
+rawBuySignal  = waitBuy and bullTrend and inZoneBull and bullCandleConfirmed and msBullConfirmed and htfBull and sessionAllowed and not isChoppy and not isExtended and barstate.isconfirmed
+rawSellSignal = waitSell and bearTrend and inZoneBear and bearCandleConfirmed and msBearConfirmed and htfBear and sessionAllowed and not isChoppy and not isExtended and barstate.isconfirmed
+
+buySignal  = rawBuySignal and (buyQualityScore >= minEntryScore) and isGradeAllowed(buyGrade)
+sellSignal = rawSellSignal and (sellQualityScore >= minEntryScore) and isGradeAllowed(sellGrade)
+
+if buySignal
+    waitBuy := false
+if sellSignal
+    waitSell := false
+
+// ======================================================
+// VISUAL EXECUTIONS & SIGNAL MARKERS
+// ======================================================
+plotshape(buySignal, title="BUY Signal Marker", style=shape.triangleup, location=location.belowbar, color=#00e676, size=size.small)
+plotshape(sellSignal, title="SELL Signal Marker", style=shape.triangledown, location=location.abovebar, color=#ff1744, size=size.small)
+
+if buySignal
+    string labelTxt = "BUY"
+    if showSignalGrade
+        labelTxt := labelTxt + " " + buyGrade
+    if showSignalScore
+        labelTxt := labelTxt + "\n(" + str.tostring(buyQualityScore, "#") + ")"
+    label.new(n, low, labelTxt, style=label.style_label_up, color=#089981, textcolor=color.white, size=size.small)
+
+if sellSignal
+    string labelTxt = "SELL"
+    if showSignalGrade
+        labelTxt := labelTxt + " " + sellGrade
+    if showSignalScore
+        labelTxt := labelTxt + "\n(" + str.tostring(sellQualityScore, "#") + ")"
+    label.new(n, high, labelTxt, style=label.style_label_down, color=#f23645, textcolor=color.white, size=size.small)
+
+// Trailing Target State Tracker 
+var bool tpBuy  = false
+var bool tpSell = false
+
+if buySignal
+    tpBuy  := true
+    tpSell := false
+if sellSignal
+    tpSell := true
+    tpBuy  := false
+if bearCross
+    tpBuy := false
+if bullCross
+    tpSell := false
+
+plotshape(tpBuy, title="TP BUY Target Active", style=shape.circle, location=location.top, color=color.new(#00e676, 30), size=size.tiny)
+plotshape(tpSell, title="TP SELL Target Active", style=shape.circle, location=location.bottom, color=color.new(#ff1744, 30), size=size.tiny)
+
+// ======================================================
+// SESSION OVERLAY ENGINE (LUXALGO BOOTSTRAP)
+// ======================================================
+get_avg(session_flag)=>
+    var int len = 1
+    var float csma = na
+    var float sma = na
+    if session_flag > session_flag[1]
+        len := 1
+        csma := close
+    if session_flag > 0 and session_flag == session_flag[1]
+        len += 1    
+        csma += close
+        sma := csma / len
+    sma
+
+get_linreg(session_flag)=>
+    var int len = 1
+    var float cwma  = na
+    var float csma  = na
+    var float csma2 = na
+    var float y1 = na
+    var float y2 = na
+    var float stdev = na 
+    var float r2    = na 
+
+    if session_flag > session_flag[1]
+        len   := 1
+        cwma  := close
+        csma  := close
+        csma2 := close * close
+    if session_flag > 0 and session_flag == session_flag[1]
+        len   += 1    
+        csma  += close
+        csma2 := close * close
+        cwma  += close * len
+        sma = csma / len
+        wma = cwma / (len * (len + 1) / 2)
+        cov   = (wma - sma) * (len+1)/2
+        stdev := math.sqrt(math.max(0, csma2 / len - sma * sma))
+        r2    := cov / (stdev * (math.sqrt(len*len - 1) / (2 * math.sqrt(3))))
+        y1 := 4 * sma - 3 * wma
+        y2 := 3 * wma - 2 * sma
+    [y1 , y2, stdev, r2]
+
+get_vwap(session_flag) =>
+    var float num = na
+    var float den = na
+    if session_flag > session_flag[1]
+        num := close * volume
+        den := volume
+    else if session_flag > 0 and session_flag == session_flag[1]
+        num += close * volume
+        den += volume
+    else
+        num := na
+    [num, den]
+
+set_line(session_flag, y1, y2, session_css)=>
+    var line tl = na
+    if session_flag > session_flag[1]
+        tl := line.new(n, close, n, close, color = session_css)
+    if session_flag > 0 and session_flag == session_flag[1]
+        line.set_y1(tl, y1)
+        line.set_xy2(tl, n, y2)
+
+get_range(session_flag, session_name, session_css)=>
+    var int t = 0 
+    var float max_val = high
+    var float min_val = low
+    var box bx = na
+    var label lbl = na 
+    if session_flag > session_flag[1]
+        t := time
+        max_val := high
+        min_val := low
+        bx := box.new(n, max_val, n, min_val, bgcolor = color.new(session_css, int(bg_transp)), border_color = show_outline ? session_css : na, border_style = line.style_dotted)
+        if show_txt
+            lbl := label.new(t, max_val, session_name, xloc = xloc.bar_time, textcolor = session_css, style = label.style_label_down, color = color.new(color.white, 100), size = size.tiny)
+    if session_flag > 0 and session_flag == session_flag[1]
+        max_val := math.max(high, max_val)
+        min_val := math.min(low, min_val)
+        box.set_top(bx, max_val)
+        box.set_rightbottom(bx, n, min_val)
+        if show_txt
+            label.set_xy(lbl, int(math.avg(t, time)), max_val)
+    [session_flag == 0 ? max_val : na, session_flag == 0 ? min_val : na]
+
+// Execute Session Engines
+var float max_sesa = na, var float min_sesa = na
+var float max_sesb = na, var float min_sesb = na
+var float max_sesc = na, var float min_sesc = na
+var float max_sesd = na, var float min_sesd = na
+
+if show_sesa and sesa_range
+    [mx, mn] = get_range(is_sesa, sesa_txt, sesa_css)
+    max_sesa := mx, min_sesa := mn
+if show_sesb and sesb_range
+    [mx, mn] = get_range(is_sesb, sesb_txt, sesb_css)
+    max_sesb := mx, min_sesb := mn
+if show_sesc and sesc_range
+    [mx, mn] = get_range(is_sesc, sesc_txt, sesc_css)
+    max_sesc := mx, min_sesc := mn
+if show_sesd and sesd_range
+    [mx, mn] = get_range(is_sesd, sesd_txt, sesd_css)
+    max_sesd := mx, min_sesd := mn
+
+var float vwap_a = na, var float vwap_b = na, var float vwap_c = na, var float vwap_d = na
+var float r2_a = na, var float stdev_a = na, var float den_a = na
+var float r2_b = na, var float stdev_b = na, var float den_b = na
+var float r2_c = na, var float stdev_c = na, var float den_c = na
+var float r2_d = na, var float stdev_d = na, var float den_d = na
+
+if show_sesa
+    [y1, y2, stdevVal, r2Val] = get_linreg(is_sesa)
+    r2_a := r2Val, stdev_a := stdevVal
+    if sesa_tl
+        set_line(is_sesa, y1, y2, sesa_css)
+    if sesa_avg
+        avg = get_avg(is_sesa)
+        set_line(is_sesa, avg, avg, sesa_css)
+    [num, den] = get_vwap(is_sesa)
+    den_a := den
+    if sesa_vwap
+        vwap_a := num / den
+
+if show_sesb
+    [y1, y2, stdevVal, r2Val] = get_linreg(is_sesb)
+    r2_b := r2Val, stdev_b := stdevVal
+    if sesb_tl
+        set_line(is_sesb, y1, y2, sesb_css)
+    if sesb_avg
+        avg = get_avg(is_sesb)
+        set_line(is_sesb, avg, avg, sesb_css)
+    [num, den] = get_vwap(is_sesb)
+    den_b := den
+    if sesb_vwap
+        vwap_b := num / den
+
+if show_sesc
+    [y1, y2, stdevVal, r2Val] = get_linreg(is_sesc)
+    r2_c := r2Val, stdev_c := stdevVal
+    if sesc_tl
+        set_line(is_sesc, y1, y2, sesc_css)
+    if sesc_avg
+        avg = get_avg(is_sesc)
+        set_line(is_sesc, avg, avg, sesc_css)
+    [num, den] = get_vwap(is_sesc)
+    den_c := den
+    if sesc_vwap
+        vwap_c := num / den
+
+if show_sesd
+    [y1, y2, stdevVal, r2Val] = get_linreg(is_sesd)
+    r2_d := r2Val, stdev_d := stdevVal
+    if sesd_tl
+        set_line(is_sesd, y1, y2, sesd_css)
+    if sesd_avg
+        avg = get_avg(is_sesd)
+        set_line(is_sesd, avg, avg, sesd_css)
+    [num, den] = get_vwap(is_sesd)
+    den_d := den
+    if sesd_vwap
+        vwap_d := num / den
+
+plot(sesa_maxmin ? max_sesa : na, 'Session A Max', sesa_css, 1, plot.style_linebr)
+plot(sesa_maxmin ? min_sesa : na, 'Session A Min', sesa_css, 1, plot.style_linebr)
+plot(sesb_maxmin ? max_sesb : na, 'Session B Max', sesb_css, 1, plot.style_linebr)
+plot(sesb_maxmin ? min_sesb : na, 'Session B Min', sesb_css, 1, plot.style_linebr)
+plot(sesc_maxmin ? max_sesc : na, 'Session C Max', sesc_css, 1, plot.style_linebr)
+plot(sesc_maxmin ? min_sesc : na, 'Session C Min', sesc_css, 1, plot.style_linebr)
+plot(sesd_maxmin ? max_sesd : na, 'Session D Max', sesd_css, 1, plot.style_linebr)
+plot(sesd_maxmin ? min_sesd : na, 'Session D Min', sesd_css, 1, plot.style_linebr)
+
+plot(vwap_a, 'Session A VWAP', sesa_css, 1, plot.style_linebr)
+plot(vwap_b, 'Session B VWAP', sesb_css, 1, plot.style_linebr)
+plot(vwap_c, 'Session C VWAP', sesc_css, 1, plot.style_linebr)
+plot(vwap_d, 'Session D VWAP', sesd_css, 1, plot.style_linebr)
+
+// ======================================================
+// COMPACT TERMINAL DASHBOARD GENERATION
+// ======================================================
+var table_position = dash_loc == 'Bottom Left' ? position.bottom_left : dash_loc == 'Top Right' ? position.top_right : position.bottom_right
+var table_size = text_size == 'Tiny' ? size.tiny : text_size == 'Small' ? size.small : size.normal
+
+var int total_rows = advanced_dash ? 11 : 7
+var table tb = table.new(table_position, 6, total_rows, bgcolor = #1e222d, border_color = #373a46, border_width = 1, frame_color = #373a46, frame_width = 1)
+
+if barstate.isfirst and show_dash
+    table.cell(tb, 0, 0, '9/21/200 SCALPER ENGINE [PRO]', bgcolor=#131722, text_color = color.white, text_size = table_size)
+    table.merge_cells(tb, 0, 0, 5, 0)
+    
+    table.cell(tb, 0, 1, "CORE METRICS", bgcolor=color.black, text_color=color.white, text_size=table_size)
+    table.merge_cells(tb, 0, 1, 5, 1)
+
+if barstate.islast and show_dash
+    signalText = buySignal ? "BUY (" + buyGrade + ")" : sellSignal ? "SELL (" + sellGrade + ")" : "WAITING"
+    signalColor = buySignal ? #089981 : sellSignal ? #f23645 : #2a2e39
+
+    // Metric Rows
+    table.cell(tb, 0, 2, "5M Trend: " + trend5MText, text_color=color.white, text_size=table_size, bgcolor=bullTrend ? #089981 : bearTrend ? #f23645 : #5d606b)
+    table.cell(tb, 1, 2, "1H Trend: " + htfStateText, text_color=color.white, text_size=table_size, bgcolor=htfClose > htf200 ? #089981 : htfClose < htf200 ? #f23645 : #5d606b)
+    table.merge_cells(tb, 1, 2, 2, 2)
+    table.cell(tb, 3, 2, "Signal: " + signalText, text_color=color.white, text_size=table_size, bgcolor=signalColor)
+    table.merge_cells(tb, 3, 2, 5, 2)
+
+    table.cell(tb, 0, 3, "EMA Health: " + str.tostring(healthScore, "#") + "/100 (" + healthText + ")", text_color=color.white, text_size=table_size)
+    table.merge_cells(tb, 0, 3, 2, 3)
+    table.cell(tb, 3, 3, "Market: " + marketRegimeText, text_color=color.white, text_size=table_size, bgcolor=isChoppy ? #f23645 : isExtended ? #ff9800 : #089981)
+    table.merge_cells(tb, 3, 3, 5, 3)
+
+    table.cell(tb, 0, 4, "Quality Score: " + str.tostring(bullTrend ? buyQualityScore : sellQualityScore, "#") + "/100", text_color=color.white, text_size=table_size)
+    table.merge_cells(tb, 0, 4, 2, 4)
+    table.cell(tb, 3, 4, "Session Window: " + activeSessionName, text_color=color.white, text_size=table_size, bgcolor=sessionAllowed ? #089981 : #5d606b)
+    table.merge_cells(tb, 3, 4, 5, 4)
+
+    table.cell(tb, 0, 5, "SESSION MONITOR", bgcolor=color.black, text_color=color.white, text_size=table_size)
+    table.merge_cells(tb, 0, 5, 5, 5)
+    
+    table.cell(tb, 0, 6, "Session", text_color=color.white, text_size=table_size)
+    table.cell(tb, 1, 6, "Status", text_color=color.white, text_size=table_size)
+    table.cell(tb, 2, 6, advanced_dash ? "Trend (R²)" : "", text_color=color.white, text_size=table_size)
+    table.cell(tb, 3, 6, advanced_dash ? "Volume" : "", text_color=color.white, text_size=table_size)
+    table.cell(tb, 4, 6, advanced_dash ? "Volatility (σ)" : "", text_color=color.white, text_size=table_size)
+    table.merge_cells(tb, 4, 6, 5, 6)
+
+    sessions_list = array.new_string(4)
+    array.set(sessions_list, 0, sesa_txt), array.set(sessions_list, 1, sesb_txt), array.set(sessions_list, 2, sesc_txt), array.set(sessions_list, 3, sesd_txt)
+    
+    sessions_colors = array.new_color(4)
+    array.set(sessions_colors, 0, sesa_css), array.set(sessions_colors, 1, sesb_css), array.set(sessions_colors, 2, sesc_css), array.set(sessions_colors, 3, sesd_css)
+    
+    sessions_active = array.new_bool(4)
+    array.set(sessions_active, 0, is_sesa > 0), array.set(sessions_active, 1, is_sesb > 0), array.set(sessions_active, 2, is_sesc > 0), array.set(sessions_active, 3, is_sesd > 0)
+
+    for i = 0 to 3
+        row_offset = 7 + i
+        table.cell(tb, 0, row_offset, array.get(sessions_list, i), text_color=array.get(sessions_colors, i), text_size=table_size)
+        table.cell(tb, 1, row_offset, array.get(sessions_active, i) ? 'Active' : 'Inactive', bgcolor=array.get(sessions_active, i) ? #089981 : #f23645, text_color=color.white, text_size=table_size)
+        
+        if advanced_dash
+            float r2_val    = (i == 0) ? r2_a : (i == 1) ? r2_b : (i == 2) ? r2_c : r2_d
+            float stdev_val = (i == 0) ? stdev_a : (i == 1) ? stdev_b : (i == 2) ? stdev_c : stdev_d
+            float den_val   = (i == 0) ? den_a : (i == 1) ? den_b : (i == 2) ? den_c : den_d
+            
+            table.cell(tb, 2, row_offset, str.tostring(r2_val, '#.##'), bgcolor=r2_val > 0 ? #089981 : #f23645, text_color=color.white, text_size=table_size)
+            table.cell(tb, 3, row_offset, str.tostring(den_val, format.volume), text_color=color.white, text_size=table_size)
+            table.cell(tb, 4, row_offset, str.tostring(stdev_val, '#.####'), text_color=color.white, text_size=table_size)
+            table.merge_cells(tb, 4, row_offset, 5, row_offset)
+
+// ======================================================
+// DIVIDERS & ALERTS
+// ======================================================
+show_ny  = (is_sesa != is_sesa[1] and show_sesa and show_ses_div)
+show_ldn = (is_sesb != is_sesb[1] and show_sesb and show_ses_div)
+show_tyo = (is_sesc != is_sesc[1] and show_sesc and show_ses_div)
+show_syd = (is_sesd != is_sesd[1] and show_sesd and show_ses_div)
+
+plotshape(show_ny, "NYE", shape.labelup, location.bottom, na, text="❚", textcolor=sesa_css, size=size.tiny, display=display.all - display.status_line)
+plotshape(show_ldn, "LDN", shape.labelup, location.bottom, na, text="❚", textcolor=sesb_css, size=size.tiny, display=display.all - display.status_line)
+plotshape(show_tyo, "TYO", shape.labelup, location.bottom, na, text="❚", textcolor=sesc_css, size=size.tiny, display=display.all - display.status_line)
+plotshape(show_syd, "SYD", shape.labelup, location.bottom, na, text="❚", textcolor=sesd_css, size=size.tiny, display=display.all - display.status_line)
+
+day = dayofweek
+if day != day[1] and show_day_div
+    line.new(n, close + syminfo.mintick, n, close - syminfo.mintick, color=color.gray, extend=extend.both, style=line.style_dashed)
+
+// TradingView Alert Conditions
+alertcondition(buySignal, title="BUY Signal (Filtered)", message="9-21-200 Scalper BUY Signal Confirmed!")
+alertcondition(sellSignal, title="SELL Signal (Filtered)", message="9-21-200 Scalper SELL Signal Confirmed!")
+alertcondition(buySignal and buyGrade == "A+", title="A+ BUY Signal Only", message="9-21-200 Scalper A+ BUY Signal Confirmed!")
+alertcondition(sellSignal and sellGrade == "A+", title="A+ SELL Signal Only", message="9-21-200 Scalper A+ SELL Signal Confirmed!")
+
+// Dynamic Alert Payload Function
+if buySignal
+    string msg = str.format("{0} | {1} | BUY | Grade: {2} | Quality Score: {3} | EMA Health: {4} | 5M: {5} | 1H: {6} | Session: {7}", syminfo.ticker, timeframe.period, buyGrade, str.tostring(buyQualityScore, "#"), str.tostring(healthScore, "#"), trend5MText, htfStateText, activeSessionName)
+    alert(msg, alert.freq_once_per_bar_close)
+
+if sellSignal
+    string msg = str.format("{0} | {1} | SELL | Grade: {2} | Quality Score: {3} | EMA Health: {4} | 5M: {5} | 1H: {6} | Session: {7}", syminfo.ticker, timeframe.period, sellGrade, str.tostring(sellQualityScore, "#"), str.tostring(healthScore, "#"), trend5MText, htfStateText, activeSessionName)
+    alert(msg, alert.freq_once_per_bar_close)
