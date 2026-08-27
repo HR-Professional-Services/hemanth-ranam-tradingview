@@ -1,0 +1,157 @@
+//@version=6
+strategy("Hemanth Ranam — Market Structure Pro", shorttitle="HR Market Structure Pro", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=1.0, commission_type=strategy.commission.percent, commission_value=0.02, slippage=2, max_labels_count=500, max_lines_count=500)
+
+// =============================================================================
+// HEMANTH RANAM — MARKET STRUCTURE PRO STRATEGY (PINE SCRIPT V6)
+// Method: Structural Pivot HH/HL/LH/LL Tracking + Break of Structure (BOS/CHoCH)
+// Architecture: Signal Quality Score Engine, Dynamic ATR SL/TP, Non-Repainting
+// =============================================================================
+
+// --- 1. GENERAL INPUTS ---
+grp_gen = "General Execution"
+trade_long  = input.bool(true, "Enable Long Trades", group=grp_gen)
+trade_short = input.bool(true, "Enable Short Trades", group=grp_gen)
+show_labels = input.bool(true, "Show BUY / SELL Chart Labels", group=grp_gen)
+show_hud    = input.bool(true, "Display On-Chart Telemetry HUD", group=grp_gen)
+hud_pos     = input.string("Top Right", "HUD Position", options=["Top Right", "Bottom Right", "Top Left", "Bottom Left"], group=grp_gen)
+
+// --- 2. STRUCTURE PARAMETERS ---
+grp_struct = "Market Structure Engine"
+pivot_left  = input.int(5, "Pivot Left Bars", minval=2, group=grp_struct)
+pivot_right = input.int(2, "Pivot Right Bars", minval=1, group=grp_struct)
+use_choch   = input.bool(true, "Require Change of Character (CHoCH) Verification", group=grp_struct)
+trend_filter_len = input.int(200, "Trend Filter EMA", minval=1, group=grp_struct)
+
+// --- 3. SCORING & FILTERS ---
+grp_score = "Signal Quality Scoring Engine"
+min_score_req = input.int(5, "Minimum Setup Score (out of 7)", minval=1, maxval=7, group=grp_score)
+use_session_filter = input.bool(false, "Enable Active Session Filter", group=grp_score)
+session_def   = input.session("0700-1700:23456", "Trading Session (UTC)", group=grp_score)
+
+// --- 4. RISK MANAGEMENT ---
+grp_risk = "Risk Management & Order Targets"
+atr_len      = input.int(14, "ATR Period", group=grp_risk)
+sl_atr_mult  = input.float(1.5, "Stop Loss (ATR Multiplier)", step=0.1, group=grp_risk)
+tp1_rr_mult  = input.float(2.0, "Take Profit 1 (R:R Ratio)", step=0.1, group=grp_risk)
+cooldown_bars= input.int(5, "Cooldown Bars Between Signals", minval=1, group=grp_risk)
+
+// =============================================================================
+// CALCULATIONS & PIVOTS
+// =============================================================================
+atr = ta.atr(atr_len)
+trend_ema = ta.ema(close, trend_filter_len)
+in_session = not use_session_filter or not na(time(timeframe.period, session_def))
+
+ph = ta.pivothigh(high, pivot_left, pivot_right)
+pl = ta.pivotlow(low, pivot_left, pivot_right)
+
+var float last_sh = na
+var float prev_sh = na
+var float last_sl = na
+var float prev_sl = na
+
+if not na(ph)
+    prev_sh := last_sh
+    last_sh := ph
+
+if not na(pl)
+    prev_sl := last_sl
+    last_sl := pl
+
+// Structural Classification
+is_hh = not na(last_sh) and not na(prev_sh) and (last_sh > prev_sh)
+is_hl = not na(last_sl) and not na(prev_sl) and (last_sl > prev_sl)
+is_lh = not na(last_sh) and not na(prev_sh) and (last_sh < prev_sh)
+is_ll = not na(last_sl) and not na(prev_sl) and (last_sl < prev_sl)
+
+// Break of Structure (BOS)
+bos_bull = ta.crossover(close, last_sh) and (close > trend_ema)
+bos_bear = ta.crossunder(close, last_sl) and (close < trend_ema)
+
+// Candlestick Confirmation
+bull_candle = (close > open) and (close > high[1])
+bear_candle = (close < open) and (close < low[1])
+
+// Setup Scoring
+score_long = 0
+if bos_bull          score_long += 2
+if is_hh or is_hl    score_long += 2
+if close > trend_ema score_long += 1
+if bull_candle       score_long += 1
+if in_session        score_long += 1
+
+score_short = 0
+if bos_bear          score_short += 2
+if is_lh or is_ll    score_short += 2
+if close < trend_ema score_short += 1
+if bear_candle       score_short += 1
+if in_session        score_short += 1
+
+var int last_trade_bar = -100
+can_trade = (bar_index - last_trade_bar) >= cooldown_bars
+
+long_condition  = trade_long and (score_long >= min_score_req) and can_trade and strategy.position_size == 0 and bos_bull
+short_condition = trade_short and (score_short >= min_score_req) and can_trade and strategy.position_size == 0 and bos_bear
+
+// Plots
+plot(trend_ema, "Trend Filter EMA 200", color=color.new(#f59e0b, 0), linewidth=2)
+
+// =============================================================================
+// ORDERS & ALERTS
+// =============================================================================
+var float entry_price = na
+var float sl_price = na
+var float tp1_price = na
+
+if long_condition
+    entry_price := close
+    sl_price    := close - (atr * sl_atr_mult)
+    risk_pts     = entry_price - sl_price
+    tp1_price   := entry_price + (risk_pts * tp1_rr_mult)
+    last_trade_bar := bar_index
+    
+    strategy.entry("HR_Struct_Long", strategy.long)
+    strategy.exit("TP/SL_Long", "HR_Struct_Long", stop=sl_price, limit=tp1_price)
+    
+    if show_labels
+        label.new(bar_index, low - (atr * 0.5), "BUY\nMarket Structure (" + str.tostring(score_long) + "/7)", color=#2563eb, textcolor=color.white, style=label.style_label_up, size=size.small)
+    
+    alert('{"brand":"Hemanth Ranam","system":"TradingView","strategy":"Market Structure Pro","signal":"BUY","symbol":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","entry":' + str.tostring(entry_price, "#.##") + ',"stop_loss":' + str.tostring(sl_price, "#.##") + ',"take_profit_1":' + str.tostring(tp1_price, "#.##") + ',"timestamp":' + str.tostring(time) + '}', alert.freq_once_per_bar_close)
+
+if short_condition
+    entry_price := close
+    sl_price    := close + (atr * sl_atr_mult)
+    risk_pts     = sl_price - entry_price
+    tp1_price   := entry_price - (risk_pts * tp1_rr_mult)
+    last_trade_bar := bar_index
+    
+    strategy.entry("HR_Struct_Short", strategy.short)
+    strategy.exit("TP/SL_Short", "HR_Struct_Short", stop=sl_price, limit=tp1_price)
+    
+    if show_labels
+        label.new(bar_index, high + (atr * 0.5), "SELL\nMarket Structure (" + str.tostring(score_short) + "/7)", color=#dc2626, textcolor=color.white, style=label.style_label_down, size=size.small)
+        
+    alert('{"brand":"Hemanth Ranam","system":"TradingView","strategy":"Market Structure Pro","signal":"SELL","symbol":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","entry":' + str.tostring(entry_price, "#.##") + ',"stop_loss":' + str.tostring(sl_price, "#.##") + ',"take_profit_1":' + str.tostring(tp1_price, "#.##") + ',"timestamp":' + str.tostring(time) + '}', alert.freq_once_per_bar_close)
+
+// =============================================================================
+// ON-CHART HUD DASHBOARD
+// =============================================================================
+if show_hud and barstate.islast
+    table_pos = hud_pos == "Top Right" ? position.top_right : hud_pos == "Bottom Right" ? position.bottom_right : hud_pos == "Top Left" ? position.top_left : position.bottom_left
+    var table hud = table.new(table_pos, 2, 6, bgcolor=color.new(#0f172a, 15), border_color=color.new(#334155, 30), border_width=1)
+    
+    table.cell(hud, 0, 0, "HEMANTH RANAM", bgcolor=color.new(#1e293b, 10), text_color=#38bdf8, text_size=size.small)
+    table.cell(hud, 1, 0, "MARKET STRUCTURE PRO", bgcolor=color.new(#1e293b, 10), text_color=color.white, text_size=size.small)
+    
+    struct_status = (is_hh and is_hl) ? "BULLISH (HH/HL)" : (is_lh and is_ll) ? "BEARISH (LH/LL)" : "TRANSITION"
+    table.cell(hud, 0, 1, "Structure", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 1, struct_status, text_color=(is_hh and is_hl) ? #22c55e : (is_lh and is_ll) ? #ef4444 : color.white, text_size=size.tiny)
+    
+    table.cell(hud, 0, 2, "Trend 200", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 2, close > trend_ema ? "BULLISH" : "BEARISH", text_color=close > trend_ema ? #22c55e : #ef4444, text_size=size.tiny)
+    
+    table.cell(hud, 0, 3, "Last Pivot High", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 3, str.tostring(last_sh, "#.##"), text_color=color.white, text_size=size.tiny)
+    
+    table.cell(hud, 0, 4, "Score", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 4, str.tostring(math.max(score_long, score_short)) + " / 7", text_color=#38bdf8, text_size=size.tiny)

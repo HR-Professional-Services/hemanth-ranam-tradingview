@@ -1,0 +1,170 @@
+//@version=6
+strategy("Hemanth Ranam — EMA Pullback Pro", shorttitle="HR EMA Pullback Pro", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=1.0, commission_type=strategy.commission.percent, commission_value=0.02, slippage=2, max_labels_count=500, max_lines_count=500)
+
+// =============================================================================
+// HEMANTH RANAM — EMA PULLBACK PRO STRATEGY (PINE SCRIPT V6)
+// Primary Method: 9/21/200 EMA Alignment + 1H HTF Trend Filter + Value Zone Pullback
+// Architecture: Signal Quality Score Engine, Dynamic ATR SL/TP, Non-Repainting
+// =============================================================================
+
+// --- 1. GENERAL & EXECUTION INPUTS ---
+grp_gen = "General Execution & Strategy Mode"
+trade_long  = input.bool(true, "Enable Long Trades", group=grp_gen)
+trade_short = input.bool(true, "Enable Short Trades", group=grp_gen)
+show_labels = input.bool(true, "Show BUY / SELL Chart Labels", group=grp_gen)
+show_hud    = input.bool(true, "Display On-Chart Telemetry HUD", group=grp_gen)
+hud_pos     = input.string("Top Right", "HUD Position", options=["Top Right", "Bottom Right", "Top Left", "Bottom Left"], group=grp_gen)
+
+// --- 2. EMA CONFIGURATION ---
+grp_ema = "EMA & Trend Parameters"
+fast_len = input.int(9, "Fast EMA Length", minval=1, group=grp_ema)
+mid_len  = input.int(21, "Mid EMA Length (Pullback Target)", minval=1, group=grp_ema)
+slow_len = input.int(200, "Trend Baseline EMA", minval=1, group=grp_ema)
+use_htf_trend = input.bool(true, "Require Higher Timeframe Trend Filter", group=grp_ema)
+htf_res       = input.timeframe("60", "Higher Timeframe Resolution", group=grp_ema)
+
+// --- 3. FILTER & SIGNAL QUALITY SCORING ENGINE ---
+grp_score = "Signal Quality Scoring Engine"
+min_score_req = input.int(6, "Minimum Setup Score (out of 8)", minval=1, maxval=8, group=grp_score)
+use_adx_filter = input.bool(true, "Require ADX Trend Strength Filter", group=grp_score)
+adx_threshold  = input.int(20, "ADX Minimum Level", minval=1, group=grp_score)
+use_session_filter = input.bool(false, "Enable Active Session Filter", group=grp_score)
+session_def   = input.session("0700-1700:23456", "Trading Session (UTC)", group=grp_score)
+
+// --- 4. RISK MANAGEMENT & TARGETS ---
+grp_risk = "Risk Management & Order Targets"
+atr_len      = input.int(14, "ATR Period", group=grp_risk)
+sl_atr_mult  = input.float(1.5, "Stop Loss (ATR Multiplier)", step=0.1, group=grp_risk)
+tp1_rr_mult  = input.float(1.5, "Take Profit 1 (R:R Ratio)", step=0.1, group=grp_risk)
+tp2_rr_mult  = input.float(2.5, "Take Profit 2 (R:R Ratio)", step=0.1, group=grp_risk)
+cooldown_bars= input.int(5, "Cooldown Bars Between Signals", minval=1, group=grp_risk)
+
+// =============================================================================
+// CALCULATIONS & INDICATOR VALUES
+// =============================================================================
+ema9   = ta.ema(close, fast_len)
+ema21  = ta.ema(close, mid_len)
+ema200 = ta.ema(close, slow_len)
+atr    = ta.atr(atr_len)
+
+// ADX Calculations
+[di_plus, di_minus, adx_val] = ta.dmi(14, 14)
+
+// Higher Timeframe Security Request (Non-Repainting: lookahead_off)
+htf_close  = request.security(syminfo.tickerid, htf_res, close[1], barmerge.gaps_off, barmerge.lookahead_off)
+htf_ema200 = request.security(syminfo.tickerid, htf_res, ta.ema(close[1], slow_len), barmerge.gaps_off, barmerge.lookahead_off)
+htf_bullish = not use_htf_trend or (htf_close > htf_ema200)
+htf_bearish = not use_htf_trend or (htf_close < htf_ema200)
+
+// Session Validation
+in_session = not use_session_filter or not na(time(timeframe.period, session_def))
+
+// Plot Baseline Curves
+plot(ema9, "EMA 9 (Fast)", color=color.new(#60a5fa, 20), linewidth=1)
+plot(ema21, "EMA 21 (Mid/Pullback)", color=color.new(#2563eb, 0), linewidth=2)
+plot(ema200, "EMA 200 (Baseline)", color=color.new(#f59e0b, 0), linewidth=2)
+
+// =============================================================================
+// SETUP DETECTION & MULTI-FACTOR SCORING ENGINE
+// =============================================================================
+// Structural Alignment
+ema_bull_align = (ema9 > ema21) and (ema21 > ema200) and (close > ema200)
+ema_bear_align = (ema9 < ema21) and (ema21 < ema200) and (close < ema200)
+
+// Value Zone Pullback Detection
+pullback_buy_zone  = (low <= ema9 or low <= ema21) and (close >= ema21)
+pullback_sell_zone = (high >= ema9 or high >= ema21) and (close <= ema21)
+
+// Candlestick Confirmation
+bull_candle = (close > open) and (close > high[1])
+bear_candle = (close < open) and (close < low[1])
+
+// Setup Scoring for Longs (8 Factors)
+score_long = 0
+if ema_bull_align       score_long += 2
+if htf_bullish          score_long += 1
+if pullback_buy_zone    score_long += 2
+if bull_candle          score_long += 1
+if adx_val >= adx_threshold or not use_adx_filter score_long += 1
+if in_session           score_long += 1
+
+// Setup Scoring for Shorts (8 Factors)
+score_short = 0
+if ema_bear_align       score_short += 2
+if htf_bearish          score_short += 1
+if pullback_sell_zone   score_short += 2
+if bear_candle          score_short += 1
+if adx_val >= adx_threshold or not use_adx_filter score_short += 1
+if in_session           score_short += 1
+
+// Cooldown Gate
+var int last_trade_bar = -100
+can_trade = (bar_index - last_trade_bar) >= cooldown_bars
+
+long_condition  = trade_long and (score_long >= min_score_req) and can_trade and strategy.position_size == 0
+short_condition = trade_short and (score_short >= min_score_req) and can_trade and strategy.position_size == 0
+
+// =============================================================================
+// ORDER EXECUTION & RISK MANAGEMENT
+// =============================================================================
+var float entry_price = na
+var float sl_price = na
+var float tp1_price = na
+var float tp2_price = na
+
+if long_condition
+    entry_price := close
+    sl_price    := close - (atr * sl_atr_mult)
+    risk_pts     = entry_price - sl_price
+    tp1_price   := entry_price + (risk_pts * tp1_rr_mult)
+    tp2_price   := entry_price + (risk_pts * tp2_rr_mult)
+    last_trade_bar := bar_index
+    
+    strategy.entry("HR_Long", strategy.long)
+    strategy.exit("TP/SL_Long", "HR_Long", stop=sl_price, limit=tp1_price)
+    
+    if show_labels
+        label.new(bar_index, low - (atr * 0.5), "BUY\nEMA Pullback (" + str.tostring(score_long) + "/8)", color=#2563eb, textcolor=color.white, style=label.style_label_up, size=size.small)
+    
+    alert('{"brand":"Hemanth Ranam","system":"TradingView","strategy":"EMA Pullback Pro","signal":"BUY","symbol":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","entry":' + str.tostring(entry_price, "#.##") + ',"stop_loss":' + str.tostring(sl_price, "#.##") + ',"take_profit_1":' + str.tostring(tp1_price, "#.##") + ',"score":' + str.tostring(score_long) + ',"timestamp":' + str.tostring(time) + '}', alert.freq_once_per_bar_close)
+
+if short_condition
+    entry_price := close
+    sl_price    := close + (atr * sl_atr_mult)
+    risk_pts     = sl_price - entry_price
+    tp1_price   := entry_price - (risk_pts * tp1_rr_mult)
+    tp2_price   := entry_price - (risk_pts * tp2_rr_mult)
+    last_trade_bar := bar_index
+    
+    strategy.entry("HR_Short", strategy.short)
+    strategy.exit("TP/SL_Short", "HR_Short", stop=sl_price, limit=tp1_price)
+    
+    if show_labels
+        label.new(bar_index, high + (atr * 0.5), "SELL\nEMA Pullback (" + str.tostring(score_short) + "/8)", color=#dc2626, textcolor=color.white, style=label.style_label_down, size=size.small)
+        
+    alert('{"brand":"Hemanth Ranam","system":"TradingView","strategy":"EMA Pullback Pro","signal":"SELL","symbol":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","entry":' + str.tostring(entry_price, "#.##") + ',"stop_loss":' + str.tostring(sl_price, "#.##") + ',"take_profit_1":' + str.tostring(tp1_price, "#.##") + ',"score":' + str.tostring(score_short) + ',"timestamp":' + str.tostring(time) + '}', alert.freq_once_per_bar_close)
+
+// =============================================================================
+// ON-CHART HUD DASHBOARD
+// =============================================================================
+if show_hud and barstate.islast
+    table_pos = hud_pos == "Top Right" ? position.top_right : hud_pos == "Bottom Right" ? position.bottom_right : hud_pos == "Top Left" ? position.top_left : position.bottom_left
+    var table hud = table.new(table_pos, 2, 7, bgcolor=color.new(#0f172a, 15), border_color=color.new(#334155, 30), border_width=1)
+    
+    table.cell(hud, 0, 0, "HEMANTH RANAM", bgcolor=color.new(#1e293b, 10), text_color=#38bdf8, text_size=size.small)
+    table.cell(hud, 1, 0, "EMA PULLBACK PRO", bgcolor=color.new(#1e293b, 10), text_color=color.white, text_size=size.small)
+    
+    table.cell(hud, 0, 1, "Trend Align", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 1, ema_bull_align ? "BULLISH" : ema_bear_align ? "BEARISH" : "NEUTRAL", text_color=ema_bull_align ? #22c55e : ema_bear_align ? #ef4444 : color.white, text_size=size.tiny)
+    
+    table.cell(hud, 0, 2, "1H HTF Trend", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 2, htf_bullish ? "BULLISH" : "BEARISH", text_color=htf_bullish ? #22c55e : #ef4444, text_size=size.tiny)
+    
+    table.cell(hud, 0, 3, "ADX (14)", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 3, str.tostring(adx_val, "#.##"), text_color=adx_val >= 20 ? #22c55e : #94a3b8, text_size=size.tiny)
+    
+    table.cell(hud, 0, 4, "ATR (14)", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 4, str.tostring(atr, "#.##"), text_color=color.white, text_size=size.tiny)
+    
+    table.cell(hud, 0, 5, "Setup Score", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 5, str.tostring(math.max(score_long, score_short)) + " / 8", text_color=#38bdf8, text_size=size.tiny)

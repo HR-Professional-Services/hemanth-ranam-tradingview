@@ -1,0 +1,149 @@
+//@version=6
+strategy("Hemanth Ranam — Momentum Volatility Pro", shorttitle="HR Momentum Squeeze Pro", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=1.0, commission_type=strategy.commission.percent, commission_value=0.02, slippage=2, max_labels_count=500, max_lines_count=500)
+
+// =============================================================================
+// HEMANTH RANAM — MOMENTUM VOLATILITY PRO STRATEGY (PINE SCRIPT V6)
+// Method: Bollinger / Keltner Squeeze Compression + Momentum Expansion Release
+// Architecture: Signal Quality Score Engine, Dynamic ATR SL/TP, Non-Repainting
+// =============================================================================
+
+// --- 1. GENERAL INPUTS ---
+grp_gen = "General Execution"
+trade_long  = input.bool(true, "Enable Long Expansion", group=grp_gen)
+trade_short = input.bool(true, "Enable Short Expansion", group=grp_gen)
+show_labels = input.bool(true, "Show BUY / SELL Chart Labels", group=grp_gen)
+show_hud    = input.bool(true, "Display On-Chart Telemetry HUD", group=grp_gen)
+hud_pos     = input.string("Top Right", "HUD Position", options=["Top Right", "Bottom Right", "Top Left", "Bottom Left"], group=grp_gen)
+
+// --- 2. SQUEEZE & VOLATILITY ENGINE ---
+grp_sqz = "Squeeze & Volatility Parameters"
+bb_len       = input.int(20, "Bollinger Length", minval=5, group=grp_sqz)
+bb_mult      = input.float(2.0, "Bollinger StDev Multiplier", step=0.1, group=grp_sqz)
+kc_len       = input.int(20, "Keltner Length", minval=5, group=grp_sqz)
+kc_atr_mult  = input.float(1.5, "Keltner ATR Multiplier", step=0.1, group=grp_sqz)
+min_sqz_bars = input.int(3, "Minimum Squeeze Compression Bars", minval=1, group=grp_sqz)
+
+// --- 3. MOMENTUM & TREND ---
+grp_mom = "Momentum & Trend Filters"
+fast_ema_len = input.int(9, "Momentum Fast EMA", minval=1, group=grp_mom)
+slow_ema_len = input.int(21, "Momentum Slow EMA", minval=1, group=grp_mom)
+trend_ema_len= input.int(200, "Trend Filter EMA 200", minval=1, group=grp_mom)
+use_session_filter = input.bool(false, "Enable Active Session Filter", group=grp_mom)
+session_def        = input.session("0700-1700:23456", "Trading Session (UTC)", group=grp_mom)
+
+// --- 4. RISK MANAGEMENT ---
+grp_risk = "Risk Management & Order Targets"
+atr_len      = input.int(14, "ATR Period", group=grp_risk)
+sl_atr_mult  = input.float(1.5, "Stop Loss (ATR Multiplier)", step=0.1, group=grp_risk)
+tp1_rr_mult  = input.float(2.0, "Take Profit 1 (R:R Ratio)", step=0.1, group=grp_risk)
+cooldown_bars= input.int(5, "Cooldown Bars Between Signals", minval=1, group=grp_risk)
+
+// =============================================================================
+// CALCULATIONS
+// =============================================================================
+atr       = ta.atr(atr_len)
+trend_ema = ta.ema(close, trend_ema_len)
+ema9      = ta.ema(close, fast_ema_len)
+ema21     = ta.ema(close, slow_ema_len)
+
+// Bollinger Bands
+bb_basis = ta.sma(close, bb_len)
+bb_dev   = bb_mult * ta.stdev(close, bb_len)
+bb_upper = bb_basis + bb_dev
+bb_lower = bb_basis - bb_dev
+
+// Keltner Channels
+kc_basis = ta.ema(close, kc_len)
+kc_range = ta.atr(kc_len) * kc_atr_mult
+kc_upper = kc_basis + kc_range
+kc_lower = kc_basis - kc_range
+
+// Squeeze Detection (Bollinger inside Keltner)
+squeeze_on = (bb_lower > kc_lower) and (bb_upper < kc_upper)
+squeeze_release = squeeze_on[1] and not squeeze_on
+
+// Count consecutive squeeze bars
+var int sqz_count = 0
+if squeeze_on
+    sqz_count += 1
+else
+    sqz_count := 0
+
+sqz_qualified = squeeze_release and (sqz_count[1] >= min_sqz_bars)
+in_session    = not use_session_filter or not na(time(timeframe.period, session_def))
+
+// Directional Expansion Conditions
+mom_bull = sqz_qualified and (close > bb_upper) and (ema9 > ema21) and (close > trend_ema) and in_session
+mom_bear = sqz_qualified and (close < bb_lower) and (ema9 < ema21) and (close < trend_ema) and in_session
+
+var int last_trade_bar = -100
+can_trade = (bar_index - last_trade_bar) >= cooldown_bars
+
+long_condition  = trade_long and mom_bull and can_trade and strategy.position_size == 0
+short_condition = trade_short and mom_bear and can_trade and strategy.position_size == 0
+
+// Plots
+plot(trend_ema, "Trend EMA 200", color=color.new(#f59e0b, 0), linewidth=2)
+plot(bb_upper, "BB Upper", color=color.new(#3b82f6, 30), linewidth=1)
+plot(bb_lower, "BB Lower", color=color.new(#3b82f6, 30), linewidth=1)
+plot(kc_upper, "KC Upper", color=color.new(#94a3b8, 40), linewidth=1, style=plot.style_circles)
+plot(kc_lower, "KC Lower", color=color.new(#94a3b8, 40), linewidth=1, style=plot.style_circles)
+
+// =============================================================================
+// ORDERS & ALERTS
+// =============================================================================
+var float entry_price = na
+var float sl_price = na
+var float tp1_price = na
+
+if long_condition
+    entry_price := close
+    sl_price    := close - (atr * sl_atr_mult)
+    risk_pts     = entry_price - sl_price
+    tp1_price   := entry_price + (risk_pts * tp1_rr_mult)
+    last_trade_bar := bar_index
+    
+    strategy.entry("HR_Mom_Long", strategy.long)
+    strategy.exit("TP/SL_Long", "HR_Mom_Long", stop=sl_price, limit=tp1_price)
+    
+    if show_labels
+        label.new(bar_index, low - (atr * 0.5), "BUY\nMomentum Squeeze", color=#2563eb, textcolor=color.white, style=label.style_label_up, size=size.small)
+    
+    alert('{"brand":"Hemanth Ranam","system":"TradingView","strategy":"Momentum Volatility Pro","signal":"BUY","symbol":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","entry":' + str.tostring(entry_price, "#.##") + ',"stop_loss":' + str.tostring(sl_price, "#.##") + ',"take_profit_1":' + str.tostring(tp1_price, "#.##") + ',"timestamp":' + str.tostring(time) + '}', alert.freq_once_per_bar_close)
+
+if short_condition
+    entry_price := close
+    sl_price    := close + (atr * sl_atr_mult)
+    risk_pts     = sl_price - entry_price
+    tp1_price   := entry_price - (risk_pts * tp1_rr_mult)
+    last_trade_bar := bar_index
+    
+    strategy.entry("HR_Mom_Short", strategy.short)
+    strategy.exit("TP/SL_Short", "HR_Mom_Short", stop=sl_price, limit=tp1_price)
+    
+    if show_labels
+        label.new(bar_index, high + (atr * 0.5), "SELL\nMomentum Squeeze", color=#dc2626, textcolor=color.white, style=label.style_label_down, size=size.small)
+        
+    alert('{"brand":"Hemanth Ranam","system":"TradingView","strategy":"Momentum Volatility Pro","signal":"SELL","symbol":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","entry":' + str.tostring(entry_price, "#.##") + ',"stop_loss":' + str.tostring(sl_price, "#.##") + ',"take_profit_1":' + str.tostring(tp1_price, "#.##") + ',"timestamp":' + str.tostring(time) + '}', alert.freq_once_per_bar_close)
+
+// =============================================================================
+// ON-CHART HUD DASHBOARD
+// =============================================================================
+if show_hud and barstate.islast
+    table_pos = hud_pos == "Top Right" ? position.top_right : hud_pos == "Bottom Right" ? position.bottom_right : hud_pos == "Top Left" ? position.top_left : position.bottom_left
+    var table hud = table.new(table_pos, 2, 6, bgcolor=color.new(#0f172a, 15), border_color=color.new(#334155, 30), border_width=1)
+    
+    table.cell(hud, 0, 0, "HEMANTH RANAM", bgcolor=color.new(#1e293b, 10), text_color=#38bdf8, text_size=size.small)
+    table.cell(hud, 1, 0, "MOMENTUM SQUEEZE", bgcolor=color.new(#1e293b, 10), text_color=color.white, text_size=size.small)
+    
+    table.cell(hud, 0, 1, "Squeeze State", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 1, squeeze_on ? "COMPRESSION (ON)" : "EXPANSION (OFF)", text_color=squeeze_on ? #ef4444 : #22c55e, text_size=size.tiny)
+    
+    table.cell(hud, 0, 2, "Trend 200", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 2, close > trend_ema ? "BULLISH" : "BEARISH", text_color=close > trend_ema ? #22c55e : #ef4444, text_size=size.tiny)
+    
+    table.cell(hud, 0, 3, "EMA 9 / 21", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 3, ema9 > ema21 ? "BULL CROSS" : "BEAR CROSS", text_color=ema9 > ema21 ? #22c55e : #ef4444, text_size=size.tiny)
+    
+    table.cell(hud, 0, 4, "ATR (14)", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 4, str.tostring(atr, "#.##"), text_color=color.white, text_size=size.tiny)

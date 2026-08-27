@@ -1,0 +1,159 @@
+//@version=6
+strategy("Hemanth Ranam — Breakout Retest Pro", shorttitle="HR Breakout Retest Pro", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=1.0, commission_type=strategy.commission.percent, commission_value=0.02, slippage=2, max_labels_count=500, max_lines_count=500)
+
+// =============================================================================
+// HEMANTH RANAM — BREAKOUT + RETEST PRO STRATEGY (PINE SCRIPT V6)
+// Method: 20-Period Range Breakout + Structural Retest Confirmation + Volume Filter
+// Architecture: Signal Quality Score Engine, Dynamic ATR SL/TP, Non-Repainting
+// =============================================================================
+
+// --- 1. GENERAL INPUTS ---
+grp_gen = "General Execution"
+trade_long  = input.bool(true, "Enable Long Trades", group=grp_gen)
+trade_short = input.bool(true, "Enable Short Trades", group=grp_gen)
+show_labels = input.bool(true, "Show BUY / SELL Chart Labels", group=grp_gen)
+show_hud    = input.bool(true, "Display On-Chart Telemetry HUD", group=grp_gen)
+hud_pos     = input.string("Top Right", "HUD Position", options=["Top Right", "Bottom Right", "Top Left", "Bottom Left"], group=grp_gen)
+
+// --- 2. BREAKOUT & RANGE PARAMETERS ---
+grp_range = "Range & Breakout Engine"
+range_len = input.int(20, "Range Lookback Period", minval=5, group=grp_range)
+max_retest_bars = input.int(10, "Max Retest Allowed Bars", minval=1, maxval=30, group=grp_range)
+use_vol_filter  = input.bool(true, "Require Volume Surge on Breakout", group=grp_range)
+vol_multiplier  = input.float(1.2, "Volume Relative Multiplier", step=0.1, group=grp_range)
+
+// --- 3. TREND & SCORING ---
+grp_score = "Signal Quality Scoring Engine"
+min_score_req = input.int(5, "Minimum Setup Score (out of 7)", minval=1, maxval=7, group=grp_score)
+trend_ema_len = input.int(200, "Trend Filter EMA (200)", minval=1, group=grp_score)
+use_session_filter = input.bool(false, "Enable Active Session Filter", group=grp_score)
+session_def   = input.session("0700-1700:23456", "Trading Session (UTC)", group=grp_score)
+
+// --- 4. RISK MANAGEMENT ---
+grp_risk = "Risk Management & Order Targets"
+atr_len      = input.int(14, "ATR Period", group=grp_risk)
+sl_atr_mult  = input.float(1.5, "Stop Loss (ATR Multiplier)", step=0.1, group=grp_risk)
+tp1_rr_mult  = input.float(2.0, "Take Profit 1 (R:R Ratio)", step=0.1, group=grp_risk)
+cooldown_bars= input.int(5, "Cooldown Bars Between Signals", minval=1, group=grp_risk)
+
+// =============================================================================
+// CALCULATIONS
+// =============================================================================
+range_high = ta.highest(high, range_len)[1]
+range_low  = ta.lowest(low, range_len)[1]
+trend_ema  = ta.ema(close, trend_ema_len)
+atr        = ta.atr(atr_len)
+avg_vol    = ta.sma(volume, 20)
+
+vol_confirmed = not use_vol_filter or (volume > (avg_vol * vol_multiplier))
+in_session    = not use_session_filter or not na(time(timeframe.period, session_def))
+
+// Breakout Detection
+breakout_up   = ta.crossover(close, range_high) and vol_confirmed
+breakout_down = ta.crossunder(close, range_low) and vol_confirmed
+
+var int last_breakout_up_bar = -100
+var float last_breakout_high = na
+var int last_breakout_down_bar = -100
+var float last_breakout_low = na
+
+if breakout_up
+    last_breakout_up_bar := bar_index
+    last_breakout_high := range_high
+
+if breakout_down
+    last_breakout_down_bar := bar_index
+    last_breakout_low := range_low
+
+// Retest & Hold Validation
+retest_up_valid   = (bar_index - last_breakout_up_bar <= max_retest_bars) and (low <= last_breakout_high) and (close >= last_breakout_high)
+retest_down_valid = (bar_index - last_breakout_down_bar <= max_retest_bars) and (high >= last_breakout_low) and (close <= last_breakout_low)
+
+// Candlestick Confirmation
+bull_candle = (close > open) and (close > high[1])
+bear_candle = (close < open) and (close < low[1])
+
+// Setup Scoring
+score_long = 0
+if retest_up_valid    score_long += 3
+if close > trend_ema  score_long += 1
+if bull_candle        score_long += 1
+if vol_confirmed      score_long += 1
+if in_session         score_long += 1
+
+score_short = 0
+if retest_down_valid  score_short += 3
+if close < trend_ema  score_short += 1
+if bear_candle        score_short += 1
+if vol_confirmed      score_short += 1
+if in_session         score_short += 1
+
+var int last_trade_bar = -100
+can_trade = (bar_index - last_trade_bar) >= cooldown_bars
+
+long_condition  = trade_long and (score_long >= min_score_req) and can_trade and strategy.position_size == 0 and ta.crossover(close, range_high)
+short_condition = trade_short and (score_short >= min_score_req) and can_trade and strategy.position_size == 0 and ta.crossunder(close, range_low)
+
+// Plot Levels
+plot(range_high, "Range High (Resistance)", color=color.new(#22c55e, 30), linewidth=1, style=plot.style_circles)
+plot(range_low, "Range Low (Support)", color=color.new(#ef4444, 30), linewidth=1, style=plot.style_circles)
+plot(trend_ema, "Trend EMA 200", color=color.new(#f59e0b, 0), linewidth=2)
+
+// =============================================================================
+// ORDERS & ALERTS
+// =============================================================================
+var float entry_price = na
+var float sl_price = na
+var float tp1_price = na
+
+if long_condition
+    entry_price := close
+    sl_price    := close - (atr * sl_atr_mult)
+    risk_pts     = entry_price - sl_price
+    tp1_price   := entry_price + (risk_pts * tp1_rr_mult)
+    last_trade_bar := bar_index
+    
+    strategy.entry("HR_Breakout_Long", strategy.long)
+    strategy.exit("TP/SL_Long", "HR_Breakout_Long", stop=sl_price, limit=tp1_price)
+    
+    if show_labels
+        label.new(bar_index, low - (atr * 0.5), "BUY\nBreakout Retest (" + str.tostring(score_long) + "/7)", color=#2563eb, textcolor=color.white, style=label.style_label_up, size=size.small)
+    
+    alert('{"brand":"Hemanth Ranam","system":"TradingView","strategy":"Breakout Retest Pro","signal":"BUY","symbol":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","entry":' + str.tostring(entry_price, "#.##") + ',"stop_loss":' + str.tostring(sl_price, "#.##") + ',"take_profit_1":' + str.tostring(tp1_price, "#.##") + ',"timestamp":' + str.tostring(time) + '}', alert.freq_once_per_bar_close)
+
+if short_condition
+    entry_price := close
+    sl_price    := close + (atr * sl_atr_mult)
+    risk_pts     = sl_price - entry_price
+    tp1_price   := entry_price - (risk_pts * tp1_rr_mult)
+    last_trade_bar := bar_index
+    
+    strategy.entry("HR_Breakout_Short", strategy.short)
+    strategy.exit("TP/SL_Short", "HR_Breakout_Short", stop=sl_price, limit=tp1_price)
+    
+    if show_labels
+        label.new(bar_index, high + (atr * 0.5), "SELL\nBreakout Retest (" + str.tostring(score_short) + "/7)", color=#dc2626, textcolor=color.white, style=label.style_label_down, size=size.small)
+        
+    alert('{"brand":"Hemanth Ranam","system":"TradingView","strategy":"Breakout Retest Pro","signal":"SELL","symbol":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","entry":' + str.tostring(entry_price, "#.##") + ',"stop_loss":' + str.tostring(sl_price, "#.##") + ',"take_profit_1":' + str.tostring(tp1_price, "#.##") + ',"timestamp":' + str.tostring(time) + '}', alert.freq_once_per_bar_close)
+
+// =============================================================================
+// ON-CHART HUD DASHBOARD
+// =============================================================================
+if show_hud and barstate.islast
+    table_pos = hud_pos == "Top Right" ? position.top_right : hud_pos == "Bottom Right" ? position.bottom_right : hud_pos == "Top Left" ? position.top_left : position.bottom_left
+    var table hud = table.new(table_pos, 2, 6, bgcolor=color.new(#0f172a, 15), border_color=color.new(#334155, 30), border_width=1)
+    
+    table.cell(hud, 0, 0, "HEMANTH RANAM", bgcolor=color.new(#1e293b, 10), text_color=#38bdf8, text_size=size.small)
+    table.cell(hud, 1, 0, "BREAKOUT RETEST PRO", bgcolor=color.new(#1e293b, 10), text_color=color.white, text_size=size.small)
+    
+    table.cell(hud, 0, 1, "Trend 200", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 1, close > trend_ema ? "BULLISH" : "BEARISH", text_color=close > trend_ema ? #22c55e : #ef4444, text_size=size.tiny)
+    
+    table.cell(hud, 0, 2, "Range High", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 2, str.tostring(range_high, "#.##"), text_color=color.white, text_size=size.tiny)
+    
+    table.cell(hud, 0, 3, "Range Low", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 3, str.tostring(range_low, "#.##"), text_color=color.white, text_size=size.tiny)
+    
+    table.cell(hud, 0, 4, "Score", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 4, str.tostring(math.max(score_long, score_short)) + " / 7", text_color=#38bdf8, text_size=size.tiny)

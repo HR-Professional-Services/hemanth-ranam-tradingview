@@ -1,0 +1,130 @@
+//@version=6
+strategy("Hemanth Ranam — VWAP Mean Reversion Pro", shorttitle="HR VWAP Reversion Pro", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=1.0, commission_type=strategy.commission.percent, commission_value=0.02, slippage=2, max_labels_count=500, max_lines_count=500)
+
+// =============================================================================
+// HEMANTH RANAM — VWAP MEAN REVERSION PRO STRATEGY (PINE SCRIPT V6)
+// Method: Standard Deviation Bands + RSI Exhaustion + Trend Protection Guard
+// Architecture: Signal Quality Score Engine, Dynamic ATR SL/TP, Non-Repainting
+// =============================================================================
+
+// --- 1. GENERAL INPUTS ---
+grp_gen = "General Execution"
+trade_long  = input.bool(true, "Enable Long Reversals", group=grp_gen)
+trade_short = input.bool(true, "Enable Short Reversals", group=grp_gen)
+show_labels = input.bool(true, "Show BUY / SELL Chart Labels", group=grp_gen)
+show_hud    = input.bool(true, "Display On-Chart Telemetry HUD", group=grp_gen)
+hud_pos     = input.string("Top Right", "HUD Position", options=["Top Right", "Bottom Right", "Top Left", "Bottom Left"], group=grp_gen)
+
+// --- 2. VWAP & EXHAUSTION PARAMETERS ---
+grp_vwap = "VWAP & Band Settings"
+dev_mult       = input.float(2.0, "Standard Deviation Multiplier", step=0.1, group=grp_vwap)
+rsi_len        = input.int(14, "RSI Length", group=grp_vwap)
+rsi_oversold   = input.int(30, "RSI Oversold Level", group=grp_vwap)
+rsi_overbought = input.int(70, "RSI Overbought Level", group=grp_vwap)
+
+// --- 3. TREND PROTECTION GUARD ---
+grp_guard = "Trend Protection Engine (Prevents Fading Strong Trends)"
+enable_trend_guard = input.bool(true, "Enable Trend Protection Guard", group=grp_guard)
+max_adx_threshold  = input.int(35, "Disable When ADX Trend Exceeds", group=grp_guard)
+use_session_filter = input.bool(false, "Enable Active Session Filter", group=grp_guard)
+session_def        = input.session("0700-1700:23456", "Trading Session (UTC)", group=grp_guard)
+
+// --- 4. RISK MANAGEMENT ---
+grp_risk = "Risk Management & Order Targets"
+atr_len      = input.int(14, "ATR Period", group=grp_risk)
+sl_atr_mult  = input.float(1.5, "Stop Loss (ATR Multiplier)", step=0.1, group=grp_risk)
+tp1_rr_mult  = input.float(1.5, "Take Profit 1 (Targeting VWAP Baseline)", step=0.1, group=grp_risk)
+cooldown_bars= input.int(5, "Cooldown Bars Between Signals", minval=1, group=grp_risk)
+
+// =============================================================================
+// CALCULATIONS
+// =============================================================================
+vwap_val   = ta.vwap(hlc3)
+stdev_val  = ta.stdev(close, 20)
+upper_band = vwap_val + (dev_mult * stdev_val)
+lower_band = vwap_val - (dev_mult * stdev_val)
+rsi_val    = ta.rsi(close, rsi_len)
+atr        = ta.atr(atr_len)
+
+// ADX Trend Strength
+[di_plus, di_minus, adx_val] = ta.dmi(14, 14)
+trend_safe = not enable_trend_guard or (adx_val < max_adx_threshold)
+in_session = not use_session_filter or not na(time(timeframe.period, session_def))
+
+// Mean Reversion Exhaustion Setup
+reversal_buy_setup  = (low <= lower_band) and (rsi_val <= rsi_oversold) and trend_safe and in_session
+reversal_sell_setup = (high >= upper_band) and (rsi_val >= rsi_overbought) and trend_safe and in_session
+
+// Rejection Confirmation Candle
+bull_confirm = (close > open) and (close > lower_band)
+bear_confirm = (close < open) and (close < upper_band)
+
+var int last_trade_bar = -100
+can_trade = (bar_index - last_trade_bar) >= cooldown_bars
+
+long_condition  = trade_long and reversal_buy_setup and bull_confirm and can_trade and strategy.position_size == 0
+short_condition = trade_short and reversal_sell_setup and bear_confirm and can_trade and strategy.position_size == 0
+
+// Plots
+plot(vwap_val, "VWAP Baseline", color=color.new(#38bdf8, 0), linewidth=2)
+plot(upper_band, "Upper StDev Band", color=color.new(#ef4444, 20), linewidth=1)
+plot(lower_band, "Lower StDev Band", color=color.new(#22c55e, 20), linewidth=1)
+
+// =============================================================================
+// ORDERS & ALERTS
+// =============================================================================
+var float entry_price = na
+var float sl_price = na
+var float tp1_price = na
+
+if long_condition
+    entry_price := close
+    sl_price    := close - (atr * sl_atr_mult)
+    risk_pts     = entry_price - sl_price
+    tp1_price   := math.min(entry_price + (risk_pts * tp1_rr_mult), vwap_val)
+    last_trade_bar := bar_index
+    
+    strategy.entry("HR_VWAP_Long", strategy.long)
+    strategy.exit("TP/SL_Long", "HR_VWAP_Long", stop=sl_price, limit=tp1_price)
+    
+    if show_labels
+        label.new(bar_index, low - (atr * 0.5), "BUY\nVWAP Reversion", color=#2563eb, textcolor=color.white, style=label.style_label_up, size=size.small)
+    
+    alert('{"brand":"Hemanth Ranam","system":"TradingView","strategy":"VWAP Mean Reversion Pro","signal":"BUY","symbol":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","entry":' + str.tostring(entry_price, "#.##") + ',"stop_loss":' + str.tostring(sl_price, "#.##") + ',"take_profit_1":' + str.tostring(tp1_price, "#.##") + ',"timestamp":' + str.tostring(time) + '}', alert.freq_once_per_bar_close)
+
+if short_condition
+    entry_price := close
+    sl_price    := close + (atr * sl_atr_mult)
+    risk_pts     = sl_price - entry_price
+    tp1_price   := math.max(entry_price - (risk_pts * tp1_rr_mult), vwap_val)
+    last_trade_bar := bar_index
+    
+    strategy.entry("HR_VWAP_Short", strategy.short)
+    strategy.exit("TP/SL_Short", "HR_VWAP_Short", stop=sl_price, limit=tp1_price)
+    
+    if show_labels
+        label.new(bar_index, high + (atr * 0.5), "SELL\nVWAP Reversion", color=#dc2626, textcolor=color.white, style=label.style_label_down, size=size.small)
+        
+    alert('{"brand":"Hemanth Ranam","system":"TradingView","strategy":"VWAP Mean Reversion Pro","signal":"SELL","symbol":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","entry":' + str.tostring(entry_price, "#.##") + ',"stop_loss":' + str.tostring(sl_price, "#.##") + ',"take_profit_1":' + str.tostring(tp1_price, "#.##") + ',"timestamp":' + str.tostring(time) + '}', alert.freq_once_per_bar_close)
+
+// =============================================================================
+// ON-CHART HUD DASHBOARD
+// =============================================================================
+if show_hud and barstate.islast
+    table_pos = hud_pos == "Top Right" ? position.top_right : hud_pos == "Bottom Right" ? position.bottom_right : hud_pos == "Top Left" ? position.top_left : position.bottom_left
+    var table hud = table.new(table_pos, 2, 6, bgcolor=color.new(#0f172a, 15), border_color=color.new(#334155, 30), border_width=1)
+    
+    table.cell(hud, 0, 0, "HEMANTH RANAM", bgcolor=color.new(#1e293b, 10), text_color=#38bdf8, text_size=size.small)
+    table.cell(hud, 1, 0, "VWAP REVERSION PRO", bgcolor=color.new(#1e293b, 10), text_color=color.white, text_size=size.small)
+    
+    table.cell(hud, 0, 1, "VWAP Level", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 1, str.tostring(vwap_val, "#.##"), text_color=color.white, text_size=size.tiny)
+    
+    table.cell(hud, 0, 2, "RSI (14)", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 2, str.tostring(rsi_val, "#.##"), text_color=rsi_val <= 30 ? #22c55e : rsi_val >= 70 ? #ef4444 : color.white, text_size=size.tiny)
+    
+    table.cell(hud, 0, 3, "Trend Guard", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 3, trend_safe ? "SAFE (ADX < " + str.tostring(max_adx_threshold) + ")" : "LOCKED (TRENDING)", text_color=trend_safe ? #22c55e : #ef4444, text_size=size.tiny)
+    
+    table.cell(hud, 0, 4, "Status", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 4, reversal_buy_setup ? "OVERSOLD" : reversal_sell_setup ? "OVERBOUGHT" : "NORMAL", text_color=reversal_buy_setup ? #22c55e : reversal_sell_setup ? #ef4444 : #94a3b8, text_size=size.tiny)
