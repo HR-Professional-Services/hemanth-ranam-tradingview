@@ -8,11 +8,12 @@ on:
 
 jobs:
   test:
+    name: Validate Pine Script v6 Strategy Suite
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Run Pine Script Syntax Integrity Tests
+      - name: Run Comprehensive Strategy Suite Tests
         run: python3 -m unittest discover tests/
