@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 """
-HR TradingView Suite — Phase 11 Passive Forward Paper-Trade Logger
+HR TradingView Suite — Phase 13 Passive Forward Paper-Trade Logger & Circuit Breaker Engine
 Validates inbound TradingView alert payloads, enforces duplicate rejection (idempotency),
-verifies fail-closed risk sizing bounds, and logs simulated executions without broker connectivity.
+verifies fail-closed risk sizing bounds, logs simulated executions, and enforces active
+circuit breakers (12 consecutive losses or 10.0% drawdown) without broker connectivity.
 
 SAFETY RULES:
 - Strictly passive / non-executing. Zero broker API calls, zero orders placed.
 - Idempotency via unique signal_id prevents alert duplicates or replay attacks.
 - Rejects signals violating 0.5% risk budget or fail-closed sizing.
+- Actively halts forward evaluation if circuit breakers are tripped.
 """
 
 import json
 import os
 import math
-import hashlib
 from typing import Dict, Any, Tuple, Optional
 
 REQUIRED_PAYLOAD_FIELDS = [
@@ -21,6 +22,42 @@ REQUIRED_PAYLOAD_FIELDS = [
     "bar_time", "direction", "entry_price", "stop_loss", "take_profit",
     "planned_risk_pct", "planned_risk_usd", "qty"
 ]
+
+def calc_pine_sizing(
+    equity: float,
+    risk_pct: float,
+    max_risk_usd: float,
+    entry_price: float,
+    sl_price: float,
+    point_value: float = 1.0,
+    contract_mult: float = 1.0,
+    min_volume_step: float = 0.01
+) -> Tuple[float, float]:
+    """
+    Exact mathematical reproduction of the Pine Script v6 calcSizing() engine.
+    Returns (valid_qty, planned_risk_usd). Fails closed (0.0 qty) on any invalid condition.
+    """
+    sl_dist = abs(entry_price - sl_price)
+    if sl_dist <= 0 or math.isnan(sl_dist) or math.isinf(sl_dist):
+        return 0.0, 0.0
+
+    if equity <= 0 or risk_pct <= 0:
+        return 0.0, 0.0
+
+    budget_usd = min(equity * (risk_pct / 100.0), max_risk_usd)
+    pv = point_value if point_value > 0 else contract_mult
+    if pv <= 0:
+        return 0.0, 0.0
+
+    raw_qty = budget_usd / (sl_dist * pv)
+    stepped_qty = math.floor(raw_qty / min_volume_step) * min_volume_step
+    stepped_qty = round(stepped_qty, 6)
+
+    if stepped_qty >= min_volume_step:
+        return stepped_qty, budget_usd
+
+    return 0.0, budget_usd
+
 
 class PaperTradeLogger:
     def __init__(self, config_path: Optional[str] = None, log_dir: Optional[str] = None):
@@ -30,11 +67,39 @@ class PaperTradeLogger:
         os.makedirs(self.log_dir, exist_ok=True)
         
         self.log_file = os.path.join(self.log_dir, "forward_paper_trades.jsonl")
+        self.closed_log_file = os.path.join(self.log_dir, "forward_closed_trades.jsonl")
         self.seen_signals = set()
-        self.load_seen_signals()
+        self.open_positions: Dict[str, Dict[str, Any]] = {}
 
-    def load_seen_signals(self):
-        """Preload seen signal_ids from existing log file to preserve idempotency across restarts."""
+        # Circuit breaker parameters & state
+        self.initial_capital = 10000.0
+        self.early_stop_consecutive_losses = 12
+        self.early_stop_max_drawdown_pct = 10.0
+        self.load_config()
+
+        self.current_equity = self.initial_capital
+        self.peak_equity = self.initial_capital
+        self.consecutive_losses = 0
+        self.circuit_breaker_tripped = False
+        self.circuit_breaker_reason = ""
+
+        self.load_history()
+
+    def load_config(self):
+        """Loads governance rules and circuit breaker thresholds from config if available."""
+        if os.path.exists(self.config_path):
+            try:
+                with open(self.config_path, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                    self.initial_capital = float(cfg.get("simulated_initial_capital", 10000.0))
+                    review = cfg.get("review_milestones", {})
+                    self.early_stop_consecutive_losses = int(review.get("early_stop_consecutive_losses", 12))
+                    self.early_stop_max_drawdown_pct = float(review.get("early_stop_max_drawdown_pct", 10.0))
+            except Exception:
+                pass
+
+    def load_history(self):
+        """Preload seen signal_ids and open positions from disk to preserve state across restarts."""
         if os.path.exists(self.log_file):
             with open(self.log_file, "r", encoding="utf-8") as f:
                 for line in f:
@@ -45,6 +110,8 @@ class PaperTradeLogger:
                             sig_id = record.get("signal_id")
                             if sig_id:
                                 self.seen_signals.add(sig_id)
+                                if record.get("status") == "LOGGED_OPEN":
+                                    self.open_positions[sig_id] = record
                         except Exception:
                             continue
 
@@ -98,9 +165,15 @@ class PaperTradeLogger:
 
     def process_alert(self, raw_data: Any) -> Dict[str, Any]:
         """
-        Parses alert string/dict, enforces idempotency, checks risk bounds,
-        simulates realistic execution fill, and writes to forward paper log.
+        Parses alert string/dict, enforces circuit breakers, enforces idempotency,
+        checks risk bounds, simulates execution fill, and logs open trade.
         """
+        if self.circuit_breaker_tripped:
+            return {
+                "status": "CIRCUIT_BREAKER_HALTED",
+                "reason": self.circuit_breaker_reason
+            }
+
         if isinstance(raw_data, str):
             try:
                 payload = json.loads(raw_data)
@@ -122,7 +195,6 @@ class PaperTradeLogger:
             return {"status": "DUPLICATE", "signal_id": sig_id, "reason": "Alert already logged previously"}
 
         # 3. Execution Simulation (Conservative Slippage & Commission)
-        # Gold/CFD default: 2 ticks = $0.02 slippage, 0.02% commission
         direction = payload["direction"]
         entry_price = float(payload["entry_price"])
         qty = float(payload["qty"])
@@ -163,4 +235,93 @@ class PaperTradeLogger:
             f.write(json.dumps(log_record) + "\n")
 
         self.seen_signals.add(sig_id)
+        self.open_positions[sig_id] = log_record
         return {"status": "LOGGED", "record": log_record}
+
+    def record_trade_exit(
+        self,
+        signal_id: str,
+        exit_price: float,
+        exit_time: int,
+        exit_reason: str
+    ) -> Dict[str, Any]:
+        """
+        Records the closing of an open simulated trade, computes realized net PnL
+        with friction, updates equity and drawdown, and evaluates circuit breakers.
+        """
+        if signal_id not in self.open_positions:
+            return {"status": "ERROR", "reason": f"Signal ID {signal_id} not found in open positions"}
+
+        pos = self.open_positions.pop(signal_id)
+        direction = pos["direction"]
+        qty = pos["qty"]
+        entry_fill = pos["simulated_fill"]
+
+        # Adverse slippage on exit: 2 ticks = $0.02
+        slippage_ticks = 2
+        tick_size = 0.01
+        slippage_cost = slippage_ticks * tick_size
+        simulated_exit_fill = (exit_price - slippage_cost) if direction == "BUY" else (exit_price + slippage_cost)
+
+        # Gross & Net PnL
+        if direction == "BUY":
+            gross_pnl = (simulated_exit_fill - entry_fill) * qty
+        else:
+            gross_pnl = (entry_fill - simulated_exit_fill) * qty
+
+        exit_notional = simulated_exit_fill * qty
+        exit_comm = exit_notional * 0.0002
+        entry_friction = pos["total_friction_usd"]
+        net_pnl = gross_pnl - exit_comm
+
+        # Update equity & drawdown tracking
+        self.current_equity += net_pnl
+        if self.current_equity > self.peak_equity:
+            self.peak_equity = self.current_equity
+
+        drawdown_pct = 0.0
+        if self.peak_equity > 0:
+            drawdown_pct = ((self.peak_equity - self.current_equity) / self.peak_equity) * 100.0
+
+        if net_pnl < 0:
+            self.consecutive_losses += 1
+        else:
+            self.consecutive_losses = 0
+
+        # Evaluate circuit breakers
+        if self.consecutive_losses >= self.early_stop_consecutive_losses:
+            self.circuit_breaker_tripped = True
+            self.circuit_breaker_reason = (
+                f"Circuit breaker tripped: {self.consecutive_losses} consecutive losses "
+                f"reached threshold of {self.early_stop_consecutive_losses}"
+            )
+        elif drawdown_pct >= self.early_stop_max_drawdown_pct:
+            self.circuit_breaker_tripped = True
+            self.circuit_breaker_reason = (
+                f"Circuit breaker tripped: Drawdown {drawdown_pct:.2f}% "
+                f"reached threshold of {self.early_stop_max_drawdown_pct}%"
+            )
+
+        closed_record = {
+            "signal_id": signal_id,
+            "candidate_id": pos["candidate_id"],
+            "direction": direction,
+            "entry_fill": entry_fill,
+            "exit_fill": round(simulated_exit_fill, 2),
+            "qty": qty,
+            "gross_pnl_usd": round(gross_pnl, 2),
+            "exit_commission_usd": round(exit_comm, 4),
+            "net_pnl_usd": round(net_pnl, 2),
+            "current_equity_usd": round(self.current_equity, 2),
+            "drawdown_pct": round(drawdown_pct, 2),
+            "consecutive_losses": self.consecutive_losses,
+            "circuit_breaker_tripped": self.circuit_breaker_tripped,
+            "exit_reason": exit_reason,
+            "exit_time": exit_time,
+            "status": "CLOSED"
+        }
+
+        with open(self.closed_log_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(closed_record) + "\n")
+
+        return {"status": "CLOSED", "record": closed_record}

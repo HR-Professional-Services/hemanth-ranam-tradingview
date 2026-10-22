@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """
-Unit Tests for Phase 11 — Forward Paper-Trading Protocol & Logger
+Unit Tests for Phase 11/13 — Forward Paper-Trading Protocol, Logger & Risk Engine
 Verifies:
 1. Schema & Range validation on inbound TradingView alert payloads.
 2. Duplicate alert prevention (idempotency via unique signal_id).
-3. Fail-closed position sizing mechanics under stop distance and risk constraints.
-4. Frozen configuration integrity (0.5% risk budget, review milestones).
+3. Directional stop loss alignment.
+4. Risk budget hard cap enforcement.
+5. Frozen configuration integrity.
+6. Exact mathematical behavior of calc_pine_sizing (rounding down, fail-closed).
+7. Active circuit breaker triggering on consecutive losses (12) and drawdown (10%).
 """
 
 import unittest
@@ -13,7 +16,7 @@ import os
 import json
 import tempfile
 import shutil
-from research.forward_test.paper_trade_logger import PaperTradeLogger
+from research.forward_test.paper_trade_logger import PaperTradeLogger, calc_pine_sizing
 
 class TestPhase11ForwardProtocol(unittest.TestCase):
     def setUp(self):
@@ -110,6 +113,104 @@ class TestPhase11ForwardProtocol(unittest.TestCase):
         candidates = [c["candidate_id"] for c in cfg["candidates"]]
         self.assertIn("HR-PRD-03-CANDIDATE-EXPA2", candidates)
         self.assertIn("HR-PRD-04-CANDIDATE-FORWARD", candidates)
+
+    def test_pine_sizing_step_rounding_and_fail_closed(self):
+        # 1. Rounding DOWN test:
+        # Equity = $10,000, risk = 0.5% ($50 budget).
+        # Entry = 2700, SL = 2689.5 (dist = 10.5).
+        # Raw qty = 50 / (10.5 * 1.0) = 4.761904...
+        # With min_volume_step = 0.01: stepped qty must be 4.76 (NOT rounded up to 4.77)
+        qty, budget = calc_pine_sizing(
+            equity=10000.0, risk_pct=0.5, max_risk_usd=100.0,
+            entry_price=2700.0, sl_price=2689.5, point_value=1.0, contract_mult=1.0, min_volume_step=0.01
+        )
+        self.assertEqual(qty, 4.76)
+        self.assertEqual(budget, 50.0)
+        # Verify realized risk at stop does not exceed planned budget
+        self.assertLessEqual(qty * 10.5, budget)
+
+        # 2. Fail closed on zero stop distance
+        qty_zero, _ = calc_pine_sizing(
+            equity=10000.0, risk_pct=0.5, max_risk_usd=100.0,
+            entry_price=2700.0, sl_price=2700.0
+        )
+        self.assertEqual(qty_zero, 0.0)
+
+        # 3. Fail closed on sub-minimum volume step
+        # If stop distance is huge (e.g. 10,000 pts), raw qty = 50 / 10000 = 0.005
+        # Below min_volume_step of 0.01 -> must fail closed to 0.0
+        qty_sub, _ = calc_pine_sizing(
+            equity=10000.0, risk_pct=0.5, max_risk_usd=100.0,
+            entry_price=12000.0, sl_price=2000.0, point_value=1.0, contract_mult=1.0, min_volume_step=0.01
+        )
+        self.assertEqual(qty_sub, 0.0)
+
+        # 4. Max risk cap clamping
+        # On $100,000 equity, 0.5% would be $500, but max_risk_usd is capped at $100
+        qty_cap, budget_cap = calc_pine_sizing(
+            equity=100000.0, risk_pct=0.5, max_risk_usd=100.0,
+            entry_price=2700.0, sl_price=2690.0, point_value=1.0, contract_mult=1.0, min_volume_step=0.01
+        )
+        self.assertEqual(budget_cap, 100.0) # Clamped to 100
+        self.assertEqual(qty_cap, 10.0)    # 100 / 10 = 10.0 units
+
+    def test_active_circuit_breaker_consecutive_losses(self):
+        # Configure logger with 3 consecutive loss limit for testing
+        self.logger.early_stop_consecutive_losses = 3
+
+        for i in range(3):
+            payload = dict(self.valid_payload)
+            payload["signal_id"] = f"SIG-LOSS-{i}"
+            payload["bar_time"] = 1730000000000 + (i * 900000)
+            log_res = self.logger.process_alert(payload)
+            self.assertEqual(log_res["status"], "LOGGED")
+
+            # Close as loss
+            exit_res = self.logger.record_trade_exit(
+                signal_id=f"SIG-LOSS-{i}",
+                exit_price=2710.50, # Hit stop
+                exit_time=1730000000000 + (i * 900000) + 60000,
+                exit_reason="STOP_LOSS"
+            )
+            self.assertEqual(exit_res["status"], "CLOSED")
+            self.assertLess(exit_res["record"]["net_pnl_usd"], 0)
+
+        # After 3 consecutive losses, circuit breaker must be tripped
+        self.assertTrue(self.logger.circuit_breaker_tripped)
+        self.assertEqual(self.logger.consecutive_losses, 3)
+
+        # Next alert must be HALTED by circuit breaker
+        next_payload = dict(self.valid_payload)
+        next_payload["signal_id"] = "SIG-AFTER-BREAKER"
+        halt_res = self.logger.process_alert(next_payload)
+        self.assertEqual(halt_res["status"], "CIRCUIT_BREAKER_HALTED")
+        self.assertIn("consecutive losses", halt_res["reason"])
+
+    def test_active_circuit_breaker_drawdown(self):
+        # Configure logger with 10% drawdown limit
+        self.logger.early_stop_max_drawdown_pct = 10.0
+        self.logger.initial_capital = 10000.0
+
+        # Log a large loss that exceeds 10% ($1,000)
+        payload = dict(self.valid_payload)
+        payload["signal_id"] = "SIG-DD-TEST"
+        payload["qty"] = 100.0 # 100 units
+        self.logger.process_alert(payload)
+
+        # Exit with a $15 loss per unit * 100 = $1,500 loss (15% drawdown)
+        exit_res = self.logger.record_trade_exit(
+            signal_id="SIG-DD-TEST",
+            exit_price=2705.50,
+            exit_time=1730000060000,
+            exit_reason="STOP_LOSS"
+        )
+        self.assertTrue(self.logger.circuit_breaker_tripped)
+        self.assertGreaterEqual(exit_res["record"]["drawdown_pct"], 10.0)
+
+        # Subsequent alert rejected
+        halt_res = self.logger.process_alert(self.valid_payload)
+        self.assertEqual(halt_res["status"], "CIRCUIT_BREAKER_HALTED")
+        self.assertIn("Drawdown", halt_res["reason"])
 
 if __name__ == '__main__':
     unittest.main()

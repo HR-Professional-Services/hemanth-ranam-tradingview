@@ -48,9 +48,9 @@ To prevent AI hallucination, marketing exaggeration, and unverified performance 
   4. `research/backtest/tests/test_backtest_harness.py`: Deterministic tests verifying EMA math, non-repainting pivot confirmation lag (3 bars), next-bar execution, and monetary risk calculations.
   5. `research/backtest/tests/test_phase9_risk_and_candidates.py`: Verifies ADX range boundaries, fixed monetary risk position sizing derivation, and zero-SL defensive fallbacks.
   6. `research/backtest/tests/test_phase10_audit.py`: Reconciles Phase 9 figures, bootstrap profit factor bounds, consecutive loss tracking, and adverse cost stress degradation.
-  7. `research/backtest/tests/test_phase11_forward_protocol.py`: Verifies alert payload schema validation, duplicate alert rejection (idempotency via unique signal_id), directional SL alignment, risk budget hard caps, and frozen configuration integrity.
+  7. `research/backtest/tests/test_phase11_forward_protocol.py`: Verifies alert payload schema validation, duplicate alert rejection (idempotency via unique signal_id), directional SL alignment, risk budget hard caps, frozen configuration integrity, exact volume step rounding down and fail-closed behavior, and active circuit breaker tripping on 12 consecutive losses and 10% drawdown.
 - **Results**:
-  - **Tests Run**: 71 (55 main regression + 16 research test cases)
+  - **Tests Run**: 74 (55 main regression + 19 research test cases)
   - **Failures**: 0
   - **Errors**: 0
   - **Status**: **PASSED (100%)**

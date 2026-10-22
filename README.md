@@ -94,11 +94,11 @@ To run the full automated validation test suite (71 deterministic tests):
 # Run Core Commercial Regression Suite (55 tests)
 python -m unittest discover tests
 
-# Run Research Backtest & Protocol Suite (16 tests)
+# Run Research Backtest & Protocol Suite (19 tests)
 python -m unittest discover research/backtest/tests
 ```
 
-Current test baseline: **71 tests passed (100% pass rate, 0 failures, 0 errors)**.
+Current test baseline: **74 tests passed (100% pass rate, 0 failures, 0 errors)**.
 
 ---
 
