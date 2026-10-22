@@ -199,40 +199,46 @@ plot(showPivots and plValid ? lastPivotLow  : na, "Active Pivot Low",  color=col
 plotshape(buySignal,  title="BUY BOS Marker",  style=shape.triangleup,   location=location.belowbar, color=colorBull, size=size.small)
 plotshape(sellSignal, title="SELL BOS Marker", style=shape.triangledown, location=location.abovebar, color=colorBear, size=size.small)
 
-plot(showRiskLevels and not na(refSL) ? refSL : na, "SL Reference", color=color.new(#ef4444, 50), style=plot.style_circles)
-plot(showRiskLevels and not na(refTP) ? refTP : na, "TP Reference", color=color.new(#22c55e, 50), style=plot.style_circles)
+// Indicative SL/TP Reference Lines (Clean linebr plots)
+plot(showRiskLevels and not na(refSL) ? refSL : na, "SL Reference", color=color.new(#ef4444, 20), linewidth=1, style=plot.style_linebr)
+plot(showRiskLevels and not na(refTP) ? refTP : na, "TP Reference", color=color.new(#22c55e, 20), linewidth=1, style=plot.style_linebr)
 
 // =============================================================================
-// TELEMETRY HUD
+// TELEMETRY HUD (CLEAN WHITE/LIGHT THEME)
 // =============================================================================
 if showHud and barstate.islast
     tablePos = hudPos == "Top Right"    ? position.top_right : 
                hudPos == "Bottom Right" ? position.bottom_right : 
                hudPos == "Top Left"     ? position.top_left : position.bottom_left
                
-    var table hud = table.new(tablePos, 2, 7, bgcolor=color.new(#0f172a, 15), border_color=color.new(#334155, 30), border_width=1)
+    var table hud = table.new(tablePos, 2, 7, bgcolor=color.white, border_color=#cbd5e1, border_width=1, frame_color=#94a3b8, frame_width=1)
     
-    table.cell(hud, 0, 0, "HEMANTH RANAM", bgcolor=color.new(#1e293b, 10), text_color=#38bdf8, text_size=size.small)
-    table.cell(hud, 1, 0, "MARKET STRUCTURE PRO", bgcolor=color.new(#1e293b, 10), text_color=color.white, text_size=size.small)
+    table.cell(hud, 0, 0, "MARKET STRUCTURE PRO", bgcolor=#f1f5f9, text_color=#0f172a, text_size=size.small)
+    table.cell(hud, 1, 0, "v1.1 [CONFIRMED]",     bgcolor=#f1f5f9, text_color=#64748b, text_size=size.small)
     
-    table.cell(hud, 0, 1, "Pivot High (BOS)", text_color=#94a3b8, text_size=size.tiny)
-    table.cell(hud, 1, 1, phValid ? str.tostring(lastPivotHigh, "#.##") : "None", text_color=#ef4444, text_size=size.tiny)
+    table.cell(hud, 0, 1, "Pivot High (BOS)", bgcolor=color.white, text_color=#64748b, text_size=size.tiny)
+    table.cell(hud, 1, 1, phValid ? str.tostring(lastPivotHigh, "#.##") : "None", bgcolor=color.white, text_color=#ef4444, text_size=size.tiny)
     
-    table.cell(hud, 0, 2, "Pivot Low (BOS)", text_color=#94a3b8, text_size=size.tiny)
-    table.cell(hud, 1, 2, plValid ? str.tostring(lastPivotLow, "#.##") : "None", text_color=#22c55e, text_size=size.tiny)
+    table.cell(hud, 0, 2, "Pivot Low (BOS)", bgcolor=color.white, text_color=#64748b, text_size=size.tiny)
+    table.cell(hud, 1, 2, plValid ? str.tostring(lastPivotLow, "#.##") : "None", bgcolor=color.white, text_color=#22c55e, text_size=size.tiny)
     
-    table.cell(hud, 0, 3, "RSI (14)", text_color=#94a3b8, text_size=size.tiny)
-    table.cell(hud, 1, 3, str.tostring(rsi, "#.#"), text_color=rsi >= 53 ? #22c55e : rsi <= 47 ? #ef4444 : color.white, text_size=size.tiny)
+    table.cell(hud, 0, 3, "RSI (14)", bgcolor=color.white, text_color=#64748b, text_size=size.tiny)
+    rsiBg = rsi >= 53 ? #dcfce7 : rsi <= 47 ? #fee2e2 : #f8fafc
+    rsiClr= rsi >= 53 ? #15803d : rsi <= 47 ? #b91c1c : #0f172a
+    table.cell(hud, 1, 3, str.tostring(rsi, "#.#"), bgcolor=rsiBg, text_color=rsiClr, text_size=size.tiny)
     
-    table.cell(hud, 0, 4, "1H Trend", text_color=#94a3b8, text_size=size.tiny)
-    table.cell(hud, 1, 4, htfClose > htfEma200 ? "BULLISH" : "BEARISH", text_color=htfClose > htfEma200 ? #22c55e : #ef4444, text_size=size.tiny)
+    table.cell(hud, 0, 4, "1H Trend", bgcolor=color.white, text_color=#64748b, text_size=size.tiny)
+    htfBullish = htfClose > htfEma200
+    htfBg  = htfBullish ? #dcfce7 : #fee2e2
+    htfClr = htfBullish ? #15803d : #b91c1c
+    table.cell(hud, 1, 4, htfBullish ? "BULLISH" : "BEARISH", bgcolor=htfBg, text_color=htfClr, text_size=size.tiny)
     
-    table.cell(hud, 0, 5, "ATR (14)", text_color=#94a3b8, text_size=size.tiny)
-    table.cell(hud, 1, 5, str.tostring(atr, "#.##"), text_color=color.white, text_size=size.tiny)
+    table.cell(hud, 0, 5, "ATR (14)", bgcolor=color.white, text_color=#64748b, text_size=size.tiny)
+    table.cell(hud, 1, 5, str.tostring(atr, "#.##"), bgcolor=color.white, text_color=#0f172a, text_size=size.tiny)
     
-    table.cell(hud, 0, 6, "Setup Score", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 0, 6, "Setup Score", bgcolor=color.white, text_color=#64748b, text_size=size.tiny)
     table.cell(hud, 1, 6, str.tostring(math.max(bullScore, bearScore), "#") + " (" + (bullScore > bearScore ? bullGrade : bearGrade) + ")", 
-               text_color=#38bdf8, text_size=size.tiny)
+               bgcolor=color.white, text_color=#0284c7, text_size=size.tiny)
 
 // =============================================================================
 // ALERTS

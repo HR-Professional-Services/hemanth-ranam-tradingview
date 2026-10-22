@@ -427,173 +427,109 @@ fill(pZone9, pZone21,
 // ─────────────────────────────────────────────────────────────────────────────
 // SIGNAL MARKERS & LABELS
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// SIGNAL MARKERS (CLEAN DIRECTIONAL TRIANGLES)
+// ─────────────────────────────────────────────────────────────────────────────
 plotshape(buySignal,  title="BUY Marker",  style=shape.triangleup,   location=location.belowbar, 
           color=colorBuy,  size=size.small)
 plotshape(sellSignal, title="SELL Marker", style=shape.triangledown, location=location.abovebar, 
           color=colorSell, size=size.small)
 
-if buySignal
-    string lbl = "BUY"
-    if showGradeOnLabel
-        lbl := lbl + " " + buyGrade
-    if showScoreOnLabel
-        lbl := lbl + "\n(" + str.tostring(buyQuality, "#") + ")"
-    label.new(n, low, lbl, style=label.style_label_up, 
-              color=color.new(#089981, 0), textcolor=color.white, size=size.small)
-
-if sellSignal
-    string lbl = "SELL"
-    if showGradeOnLabel
-        lbl := lbl + " " + sellGrade
-    if showScoreOnLabel
-        lbl := lbl + "\n(" + str.tostring(sellQuality, "#") + ")"
-    label.new(n, high, lbl, style=label.style_label_down, 
-              color=color.new(#f23645, 0), textcolor=color.white, size=size.small)
-
 // ─── RISK REFERENCE LINES ─────────────────────────────────────────────────────
-// Plot SL / TP reference levels from the most recent signal bar.
-// Displayed as dotted lines. These are NOT orders — they are informational guides.
-plot(showRiskLevels and showRlLevels ? refSL  : na, title="SL Ref",  
-     color=color.new(#ff5252, 20), linewidth=1, style=plot.style_linebr)
-plot(showRiskLevels and showRlLevels ? refTP1 : na, title="TP1 Ref", 
-     color=color.new(#00e676, 30), linewidth=1, style=plot.style_linebr)
-plot(showRiskLevels and showRlLevels ? refTP2 : na, title="TP2 Ref", 
-     color=color.new(#00e676, 60), linewidth=1, style=plot.style_linebr)
-
-// ─── ACTIVE SIGNAL STATE DOTS ─────────────────────────────────────────────────
-var bool tpBuy  = false
-var bool tpSell = false
-if buySignal  
-    tpBuy  := true,  tpSell := false
-if sellSignal 
-    tpSell := true,  tpBuy  := false
-if bearCross  
-    tpBuy  := false
-if bullCross  
-    tpSell := false
-
-plotshape(tpBuy,  "BUY Active",  shape.circle, location.top,    color.new(colorBuy,  30), size=size.tiny)
-plotshape(tpSell, "SELL Active", shape.circle, location.bottom, color.new(colorSell, 30), size=size.tiny)
+// Plot SL / TP reference levels from the most recent active signal bar.
+// Clean linebr plots attached directly to price series without accumulating objects.
+plot(showRiskLevels and showRlLevels and not na(refSL) ? refSL : na, title="SL Ref",  
+     color=color.new(#dc2626, 20), linewidth=1, style=plot.style_linebr)
+plot(showRiskLevels and showRlLevels and not na(refTP1) ? refTP1 : na, title="TP1 Ref", 
+     color=color.new(#059669, 30), linewidth=1, style=plot.style_linebr)
+plot(showRiskLevels and showRlLevels and not na(refTP2) ? refTP2 : na, title="TP2 Ref", 
+     color=color.new(#059669, 60), linewidth=1, style=plot.style_linebr)
 
 // ─── DAILY DIVIDER ─────────────────────────────────────────────────────────────
 day = dayofweek
 if day != day[1] and showDayDiv
     line.new(n, close + syminfo.mintick, n, close - syminfo.mintick, 
-             color=color.new(color.gray, 60), extend=extend.both, style=line.style_dashed)
+             color=color.new(#94a3b8, 60), extend=extend.both, style=line.style_dashed)
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DASHBOARD
+// TELEMETRY DASHBOARD (CLEAN WHITE/LIGHT THEME)
 // ─────────────────────────────────────────────────────────────────────────────
 var tbl_pos  = dashPos == "Bottom Left" ? position.bottom_left  : 
                dashPos == "Top Left"    ? position.top_left     :
                dashPos == "Bottom Right"? position.bottom_right : position.top_right
 var tbl_size = dashSize == "Tiny" ? size.tiny : dashSize == "Normal" ? size.normal : size.small
 
-var int totalRows = showAdvDash ? 9 : 6
-var table tb = table.new(tbl_pos, 4, totalRows, 
-                         bgcolor=#1e222d, border_color=#373a46, border_width=1, 
-                         frame_color=#373a46, frame_width=1)
-
-if barstate.isfirst and showDash
-    table.cell(tb, 0, 0, "HR EMA PULLBACK PRO  v1.0", 
-               bgcolor=#131722, text_color=color.white, text_size=tbl_size)
-    table.merge_cells(tb, 0, 0, 3, 0)
+var int totalRows = showAdvDash ? 7 : 5
+var table tb = table.new(tbl_pos, 2, totalRows, 
+                         bgcolor=color.white, 
+                         border_color=#cbd5e1, 
+                         border_width=1, 
+                         frame_color=#94a3b8, 
+                         frame_width=1)
 
 if barstate.islast and showDash
-    // Row 1: Signal state
+    // Header
+    table.cell(tb, 0, 0, "EMA PULLBACK PRO", bgcolor=#f1f5f9, text_color=#0f172a, text_size=tbl_size)
+    table.cell(tb, 1, 0, "v1.1 [CONFIRMED]", bgcolor=#f1f5f9, text_color=#64748b, text_size=tbl_size)
+    
+    // Row 1: Signal & Setup Status
     activeSignal = buySignal  ? "BUY ("  + buyGrade  + ")" : 
                    sellSignal ? "SELL (" + sellGrade + ")" : 
-                   tpBuy      ? "IN BUY" : tpSell ? "IN SELL" : "WATCHING"
-    sigColor     = buySignal or tpBuy   ? #089981 : 
-                   sellSignal or tpSell ? #f23645 : #2a2e39
-    table.cell(tb, 0, 1, "SIGNAL: " + activeSignal, 
-               text_color=color.white, text_size=tbl_size, bgcolor=sigColor)
-    table.merge_cells(tb, 0, 1, 3, 1)
-
-    // Row 2: Trend states
-    trendColor = bullTrend ? #089981 : bearTrend ? #f23645 : #5d606b
-    htfColor   = htfClose > htf200 ? #089981 : htfClose < htf200 ? #f23645 : #5d606b
-    table.cell(tb, 0, 2, "TREND: " + trendText,    
-               text_color=color.white, text_size=tbl_size, bgcolor=trendColor)
-    table.merge_cells(tb, 0, 2, 1, 2)
-    table.cell(tb, 2, 2, "HTF: " + htfStateText,   
-               text_color=color.white, text_size=tbl_size, bgcolor=htfColor)
-    table.merge_cells(tb, 2, 2, 3, 2)
-
-    // Row 3: Market regime
-    regColor = isChoppy ? #f23645 : isExtended ? #ff9800 : #089981
-    table.cell(tb, 0, 3, "MARKET: " + regimeText,  
-               text_color=color.white, text_size=tbl_size, bgcolor=regColor)
-    table.merge_cells(tb, 0, 3, 1, 3)
-    sessColor = sessionAllowed ? #089981 : #5d606b
-    table.cell(tb, 2, 3, "SESSION: " + activeSessionName, 
-               text_color=color.white, text_size=tbl_size, bgcolor=sessColor)
-    table.merge_cells(tb, 2, 3, 3, 3)
-
-    // Row 4: EMA health and quality score
+                   (not na(refEntry)) ? (refLong ? "IN LONG" : "IN SHORT") : "WATCHING"
+    sigBgColor   = buySignal  ? #dcfce7 : 
+                   sellSignal ? #fee2e2 : 
+                   (not na(refEntry)) ? #fef3c7 : #f8fafc
+    sigTxtColor  = buySignal  ? #15803d : 
+                   sellSignal ? #b91c1c : 
+                   (not na(refEntry)) ? #b45309 : #475569
+    table.cell(tb, 0, 1, "Signal State", bgcolor=color.white, text_color=#64748b, text_size=tbl_size)
+    table.cell(tb, 1, 1, activeSignal,   bgcolor=sigBgColor,  text_color=sigTxtColor, text_size=tbl_size)
+    
+    // Row 2: Trend & HTF Alignment
+    trendBgColor = bullTrend ? #dcfce7 : bearTrend ? #fee2e2 : #f8fafc
+    trendTxt     = bullTrend ? "BULLISH" : bearTrend ? "BEARISH" : "NEUTRAL"
+    htfTxt       = htfClose > htf200 ? "1H BULL" : "1H BEAR"
+    table.cell(tb, 0, 2, "Trend / HTF", bgcolor=color.white, text_color=#64748b, text_size=tbl_size)
+    table.cell(tb, 1, 2, trendTxt + " | " + htfTxt, bgcolor=trendBgColor, text_color=#0f172a, text_size=tbl_size)
+    
+    // Row 3: Market Regime & Gap
+    regTxt = isChoppy ? "CHOPPY" : isExtended ? "EXTENDED" : "TRENDING"
+    regBg  = isChoppy ? #fee2e2 : isExtended ? #fef3c7 : #dcfce7
+    table.cell(tb, 0, 3, "Market Regime", bgcolor=color.white, text_color=#64748b, text_size=tbl_size)
+    table.cell(tb, 1, 3, regTxt + " (" + str.tostring(gapRatio, "#.##") + "x ATR)", bgcolor=regBg, text_color=#0f172a, text_size=tbl_size)
+    
+    // Row 4: Quality Score & Session
     activeScore = bullTrend ? buyQuality : sellQuality
-    table.cell(tb, 0, 4, "EMA HEALTH: " + str.tostring(healthScore, "#") + "/100 (" + healthText + ")", 
-               text_color=color.white, text_size=tbl_size)
-    table.merge_cells(tb, 0, 4, 1, 4)
-    table.cell(tb, 2, 4, "QUALITY SCORE: " + str.tostring(activeScore, "#") + "/100", 
-               text_color=color.white, text_size=tbl_size)
-    table.merge_cells(tb, 2, 4, 3, 4)
-
+    table.cell(tb, 0, 4, "Quality Score", bgcolor=color.white, text_color=#64748b, text_size=tbl_size)
+    table.cell(tb, 1, 4, str.tostring(activeScore, "#") + "/100 (" + activeSessionName + ")", bgcolor=color.white, text_color=#0f172a, text_size=tbl_size)
+    
     if showAdvDash
-        // Row 5: Risk reference
-        if not na(refEntry)
-            rrText = "ENTRY: " + str.tostring(refEntry, format.mintick) + 
-                     "  SL: " + str.tostring(refSL, format.mintick) +
-                     "  TP1: " + str.tostring(refTP1, format.mintick)
-            table.cell(tb, 0, 5, rrText, text_color=color.white, text_size=tbl_size)
-            table.merge_cells(tb, 0, 5, 3, 5)
-
-        // Row 6: Filters active
-        filters = "Filters: " + 
-                  (useHtfFilter ? "HTF " : "") + 
-                  (useChopFilter ? "CHOP " : "") + 
-                  (useExtFilter ? "EXT " : "") + 
-                  (useMsFilter ? "MS " : "") + 
-                  (useSessionFilter ? "SESS" : "")
-        table.cell(tb, 0, 6, filters, text_color=#888888, text_size=tbl_size)
-        table.merge_cells(tb, 0, 6, 3, 6)
-
-        // Row 7: EMA values
-        emaRow = "EMA9: " + str.tostring(ema9, format.mintick) + 
-                 "  EMA21: " + str.tostring(ema21, format.mintick) + 
-                 "  EMA200: " + str.tostring(ema200, format.mintick)
-        table.cell(tb, 0, 7, emaRow, text_color=#888888, text_size=tbl_size)
-        table.merge_cells(tb, 0, 7, 3, 7)
-
-        // Row 8: ATR & Gap
-        metaRow = "ATR: " + str.tostring(atr, format.mintick) + 
-                  "  Gap Ratio: " + str.tostring(gapRatio, "#.##") + 
-                  "  TF: " + timeframe.period
-        table.cell(tb, 0, 8, metaRow, text_color=#888888, text_size=tbl_size)
-        table.merge_cells(tb, 0, 8, 3, 8)
+        // Row 5: Risk Levels
+        riskTxt = not na(refEntry) ? "EP:" + str.tostring(refEntry, format.mintick) + " SL:" + str.tostring(refSL, format.mintick) + " TP:" + str.tostring(refTP1, format.mintick) : "Standby"
+        table.cell(tb, 0, 5, "Trade Targets", bgcolor=color.white, text_color=#64748b, text_size=tbl_size)
+        table.cell(tb, 1, 5, riskTxt, bgcolor=color.white, text_color=#0f172a, text_size=tbl_size)
+        
+        // Row 6: Active Filters
+        activeFlts = (useHtfFilter ? "HTF " : "") + (useChopFilter ? "CHOP " : "") + (useExtFilter ? "EXT " : "") + (useMsFilter ? "MS " : "") + (useSessionFilter ? "SESS" : "NONE")
+        table.cell(tb, 0, 6, "Filters Active", bgcolor=color.white, text_color=#64748b, text_size=tbl_size)
+        table.cell(tb, 1, 6, activeFlts, bgcolor=color.white, text_color=#64748b, text_size=tbl_size)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ALERT CONDITIONS
 // ─────────────────────────────────────────────────────────────────────────────
-// TradingView alertcondition() registers conditions you can attach alerts to.
-// Alerts fire on bar close (barstate.isconfirmed is already required in the signal).
-// To set up an alert: right-click chart → Add alert → select condition below.
 alertcondition(buySignal  and alertOnBuy,  
-     title="HR EMA Pullback — BUY Signal",  
-     message="HR EMA Pullback PRO | BUY Signal Confirmed | Check dashboard for details.")
+     title="EMA Pullback — BUY Signal",  
+     message="EMA Pullback | Confirmed BUY Signal | Check chart for trade levels.")
 alertcondition(sellSignal and alertOnSell, 
-     title="HR EMA Pullback — SELL Signal", 
-     message="HR EMA Pullback PRO | SELL Signal Confirmed | Check dashboard for details.")
+     title="EMA Pullback — SELL Signal", 
+     message="EMA Pullback | Confirmed SELL Signal | Check chart for trade levels.")
 alertcondition(buySignal  and buyGrade  == "A+" and alertOnAPlus, 
-     title="HR EMA Pullback — A+ BUY",  
-     message="HR EMA Pullback PRO | A+ BUY Signal Confirmed | Top-grade setup.")
+     title="EMA Pullback — A+ BUY",  
+     message="EMA Pullback | Confirmed A+ BUY Signal | Top conviction setup.")
 alertcondition(sellSignal and sellGrade == "A+" and alertOnAPlus, 
-     title="HR EMA Pullback — A+ SELL", 
-     message="HR EMA Pullback PRO | A+ SELL Signal Confirmed | Top-grade setup.")
+     title="EMA Pullback — A+ SELL", 
+     message="EMA Pullback | Confirmed A+ SELL Signal | Top conviction setup.")
 
-// Dynamic alert payload (fires once per bar close via built-in alert())
-// Format: SYMBOL | TF | DIRECTION | Grade | Score | Health | Trend | HTF | Session
-// Future v2.0: JSON webhook via research/schema/alert-payload.schema.json
 if buySignal and alertOnBuy
     string msg = '{"brand":"Hemanth Ranam","system":"TradingView","strategy":"EMA Pullback Pro","signal":"BUY","symbol":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","entry":' + str.tostring(refEntry, "#.##") + ',"stop_loss":' + str.tostring(refSL, "#.##") + ',"take_profit_1":' + str.tostring(refTP1, "#.##") + ',"score":' + str.tostring(buyQuality, "#") + ',"grade":"' + buyGrade + '","timestamp":' + str.tostring(time) + '}'
     alert(msg, alert.freq_once_per_bar_close)
