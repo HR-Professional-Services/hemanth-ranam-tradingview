@@ -1,0 +1,244 @@
+//@version=6
+indicator("HR Market Structure Momentum Pro [Indicator]", 
+          shorttitle="HR Market Structure", 
+          overlay=true, 
+          max_labels_count=500, 
+          max_boxes_count=200, 
+          max_lines_count=200)
+
+// =============================================================================
+// HR MARKET STRUCTURE MOMENTUM PRO — COMMERCIAL INDICATOR v1.0
+// Product ID: HR-PRD-04
+// System: HR TradingView Suite | ScaleNova / HR Professional Services
+// Author: Hemanth Ranam | Developed by Antigravity Engine
+//
+// METHODOLOGY:
+//   - Identifies structural Swing High / Swing Low fractal pivots (InpPivotStrength = 3)
+//   - Tracks confirmed Break of Structure (BOS) on confirmed closed-bar breaks
+//   - Momentum Filter: Enforces RSI(14) >= 53 for Bullish BOS, <= 47 for Bearish BOS
+//   - Macro Regime Filter: Enforces 1H HTF 200 EMA directional alignment
+//   - Aligned directly with MT5 EA: MARKET_STRUCTURE_MOMENTUM_EA.mq5
+//
+// NON-REPAINTING & PIVOT CONFIRMATION CONTRACT:
+//   - Pivots require pivotStrength (3) right-side bars before confirmation.
+//   - BOS signals fire strictly on the bar that breaks and closes beyond the confirmed pivot.
+//   - Signals are NOT backdated to the pivot peak.
+// =============================================================================
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INPUT GROUPS
+// ─────────────────────────────────────────────────────────────────────────────
+var string GRP_GEN    = "● General Execution"
+var string GRP_STRUCT = "● Market Structure Pivots"
+var string GRP_MOM    = "● Momentum Confirmation (RSI)"
+var string GRP_HTF    = "● Higher-Timeframe Filter"
+var string GRP_SCORE  = "● Signal Quality Scoring"
+var string GRP_RISK   = "● Risk Reference Levels"
+var string GRP_DASH   = "● Dashboard & Telemetry"
+var string GRP_VIS    = "● Visual Settings"
+
+// ─── GENERAL EXECUTION ───────────────────────────────────────────────────────
+enableLong  = input.bool(true,  "Enable Bullish BOS Signals", group=GRP_GEN)
+enableShort = input.bool(true,  "Enable Bearish BOS Signals", group=GRP_GEN)
+
+// ─── MARKET STRUCTURE PIVOTS ─────────────────────────────────────────────────
+pivotStrength  = input.int(3,   "Pivot Strength (Left/Right Bars)", minval=1, maxval=10, group=GRP_STRUCT,
+     tooltip="Number of bars required to confirm a swing fractal. Aligned with MT5 InpPivotStrength=3.")
+lookbackWindow = input.int(40,  "Max Structure Lookback Window", minval=10, maxval=100, group=GRP_STRUCT,
+     tooltip="Maximum bars to search for the active reference pivot. Aligned with MT5 InpLookbackWindow=40.")
+
+// ─── MOMENTUM CONFIRMATION (RSI) ─────────────────────────────────────────────
+rsiPeriod      = input.int(14,     "RSI Period", minval=2, group=GRP_MOM)
+bullishRsiMin  = input.float(53.0, "Bullish Breakout Min RSI", minval=50.0, maxval=70.0, step=0.5, group=GRP_MOM,
+     tooltip="RSI must be at or above this level to validate bullish momentum. Aligned with MT5 InpBullishRSIMin=53.0.")
+bearishRsiMax  = input.float(47.0, "Bearish Breakout Max RSI", minval=30.0, maxval=50.0, step=0.5, group=GRP_MOM,
+     tooltip="RSI must be at or below this level to validate bearish momentum. Aligned with MT5 InpBearishRSIMax=47.0.")
+
+// ─── HIGHER-TIMEFRAME FILTER ─────────────────────────────────────────────────
+useHtfFilter   = input.bool(true,  "Enable HTF Trend Filter", group=GRP_HTF)
+htfTF          = input.timeframe("60", "Higher Timeframe", group=GRP_HTF)
+htfEmaLen      = input.int(200, "HTF Baseline EMA", minval=10, group=GRP_HTF)
+
+// ─── SIGNAL QUALITY SCORING ──────────────────────────────────────────────────
+minEntryScore  = input.int(70, "Minimum Entry Quality Score (0–100)", minval=50, maxval=95, step=5, group=GRP_SCORE)
+minSignalGrade = input.string("A and Above", "Minimum Signal Grade",
+     options=["A+ Only", "A and Above", "B and Above", "All Signals"], group=GRP_SCORE)
+
+// ─── RISK REFERENCE LEVELS ───────────────────────────────────────────────────
+showRiskLevels = input.bool(true,  "Show SL / TP Indicative Levels", group=GRP_RISK)
+atrLen         = input.int(14,     "ATR Period", minval=1, group=GRP_RISK)
+slBufferAtr    = input.float(0.15, "Protective SL Buffer (× ATR)", minval=0.0, step=0.05, group=GRP_RISK)
+rrMultiplier   = input.float(2.4,  "Target Reward-to-Risk (R:R)", minval=1.0, step=0.1, group=GRP_RISK,
+     tooltip="Target R:R ratio. Aligned with MT5 InpRewardToRiskRatio=2.4.")
+
+// ─── DASHBOARD & VISUALS ─────────────────────────────────────────────────────
+showHud        = input.bool(true,  "Display Telemetry HUD", group=GRP_DASH)
+hudPos         = input.string("Top Right", "HUD Position",
+     options=["Top Right", "Bottom Right", "Top Left", "Bottom Left"], group=GRP_DASH)
+showPivots     = input.bool(true,  "Plot Structure Pivot Points", group=GRP_VIS)
+colorBull      = input.color(#22c55e, "Bullish Signal Color", group=GRP_VIS)
+colorBear      = input.color(#ef4444, "Bearish Signal Color", group=GRP_VIS)
+
+// =============================================================================
+// CALCULATIONS & INDICATOR VALUES
+// =============================================================================
+atr = ta.atr(atrLen)
+rsi = ta.rsi(close, rsiPeriod)
+
+// HTF Security Request (Strict [1] indexing and lookahead_off)
+htfClose  = request.security(syminfo.tickerid, htfTF, close[1], barmerge.gaps_off, barmerge.lookahead_off)
+htfEma200 = request.security(syminfo.tickerid, htfTF, ta.ema(close, htfEmaLen)[1], barmerge.gaps_off, barmerge.lookahead_off)
+htfBullOk = not useHtfFilter or (htfClose > htfEma200)
+htfBearOk = not useHtfFilter or (htfClose < htfEma200)
+
+// 1. Structural Pivot Fractals
+ph = ta.pivothigh(high, pivotStrength, pivotStrength)
+pl = ta.pivotlow(low,   pivotStrength, pivotStrength)
+
+var float lastPivotHigh = na
+var float lastPivotLow  = na
+var int   lastPhBar     = 0
+var int   lastPlBar     = 0
+
+if not na(ph)
+    lastPivotHigh := ph
+    lastPhBar     := bar_index - pivotStrength
+
+if not na(pl)
+    lastPivotLow  := pl
+    lastPlBar     := bar_index - pivotStrength
+
+// Structure validity window
+phValid = not na(lastPivotHigh) and (bar_index - lastPhBar <= lookbackWindow)
+plValid = not na(lastPivotLow)  and (bar_index - lastPlBar <= lookbackWindow)
+
+// 2. Break of Structure (BOS) Detection
+// Bullish BOS: Previous candle closed below or equal to confirmed pivot high; current candle breaks and closes strictly ABOVE it
+bullBos = enableLong and phValid and (close[1] <= lastPivotHigh) and (close > lastPivotHigh) and 
+          (rsi >= bullishRsiMin) and htfBullOk and barstate.isconfirmed
+
+// Bearish BOS: Previous candle closed above or equal to confirmed pivot low; current candle breaks and closes strictly BELOW it
+bearBos = enableShort and plValid and (close[1] >= lastPivotLow) and (close < lastPivotLow) and 
+          (rsi <= bearishRsiMax) and htfBearOk and barstate.isconfirmed
+
+// =============================================================================
+// QUALITY SCORING ENGINE (0–100)
+// =============================================================================
+calcQualityScore(isBull) =>
+    float s = 0.0
+    // Momentum Strength Score (0-35)
+    s += isBull ? (rsi >= 60.0 ? 35.0 : rsi >= 55.0 ? 25.0 : 15.0) : 
+                  (rsi <= 40.0 ? 35.0 : rsi <= 45.0 ? 25.0 : 15.0)
+                  
+    // Breakout Cleanliness Score (0-30): Close distance past pivot
+    float breakDist = isBull ? (close - lastPivotHigh) : (lastPivotLow - close)
+    float breakRatio = atr > 0 ? (breakDist / atr) : 0.0
+    s += breakRatio >= 0.3 ? 30.0 : breakRatio >= 0.15 ? 20.0 : 10.0
+    
+    // HTF Alignment Score (0-20)
+    s += isBull ? (htfClose > htfEma200 ? 20.0 : 0.0) : (htfClose < htfEma200 ? 20.0 : 0.0)
+    
+    // Candle Range Expansion (0-15)
+    s += (high - low) >= atr ? 15.0 : 5.0
+    math.min(100.0, s)
+
+bullScore = calcQualityScore(true)
+bearScore = calcQualityScore(false)
+
+getGrade(score) =>
+    score >= 90.0 ? "A+" : score >= 75.0 ? "A" : score >= 60.0 ? "B" : "C"
+
+bullGrade = getGrade(bullScore)
+bearGrade = getGrade(bearScore)
+
+isGradeAllowed(grade) =>
+    switch minSignalGrade
+        "A+ Only"     => grade == "A+"
+        "A and Above" => grade == "A+" or grade == "A"
+        "B and Above" => grade == "A+" or grade == "A" or grade == "B"
+        => true
+
+// Cooldown & Single Event Gate
+var int lastBullBar = -100
+var int lastBearBar = -100
+cooldownBars = 5
+canBull = (bar_index - lastBullBar) >= cooldownBars
+canBear = (bar_index - lastBearBar) >= cooldownBars
+
+buySignal  = bullBos and canBull and (bullScore >= minEntryScore) and isGradeAllowed(bullGrade)
+sellSignal = bearBos and canBear and (bearScore >= minEntryScore) and isGradeAllowed(bearGrade)
+
+if buySignal
+    lastBullBar := bar_index
+if sellSignal
+    lastBearBar := bar_index
+
+// Reference Risk Tracking
+var float refEntry = na
+var float refSL    = na
+var float refTP    = na
+
+if buySignal
+    refEntry := close
+    float baseSL = not na(lastPivotLow) ? lastPivotLow : low
+    refSL := baseSL - (atr * slBufferAtr)
+    refTP := refEntry + ((refEntry - refSL) * rrMultiplier)
+
+if sellSignal
+    refEntry := close
+    float baseSL = not na(lastPivotHigh) ? lastPivotHigh : high
+    refSL := baseSL + (atr * slBufferAtr)
+    refTP := refEntry - ((refSL - refEntry) * rrMultiplier)
+
+// =============================================================================
+// VISUAL PLOTS
+// =============================================================================
+plot(showPivots and phValid ? lastPivotHigh : na, "Active Pivot High", color=color.new(#ef4444, 40), linewidth=1, style=plot.style_stepline)
+plot(showPivots and plValid ? lastPivotLow  : na, "Active Pivot Low",  color=color.new(#22c55e, 40), linewidth=1, style=plot.style_stepline)
+
+plotshape(buySignal,  title="BUY BOS Marker",  style=shape.triangleup,   location=location.belowbar, color=colorBull, size=size.small)
+plotshape(sellSignal, title="SELL BOS Marker", style=shape.triangledown, location=location.abovebar, color=colorBear, size=size.small)
+
+plot(showRiskLevels and not na(refSL) ? refSL : na, "SL Reference", color=color.new(#ef4444, 50), style=plot.style_circles)
+plot(showRiskLevels and not na(refTP) ? refTP : na, "TP Reference", color=color.new(#22c55e, 50), style=plot.style_circles)
+
+// =============================================================================
+// TELEMETRY HUD
+// =============================================================================
+if showHud and barstate.islast
+    tablePos = hudPos == "Top Right"    ? position.top_right : 
+               hudPos == "Bottom Right" ? position.bottom_right : 
+               hudPos == "Top Left"     ? position.top_left : position.bottom_left
+               
+    var table hud = table.new(tablePos, 2, 7, bgcolor=color.new(#0f172a, 15), border_color=color.new(#334155, 30), border_width=1)
+    
+    table.cell(hud, 0, 0, "HEMANTH RANAM", bgcolor=color.new(#1e293b, 10), text_color=#38bdf8, text_size=size.small)
+    table.cell(hud, 1, 0, "MARKET STRUCTURE PRO", bgcolor=color.new(#1e293b, 10), text_color=color.white, text_size=size.small)
+    
+    table.cell(hud, 0, 1, "Pivot High (BOS)", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 1, phValid ? str.tostring(lastPivotHigh, "#.##") : "None", text_color=#ef4444, text_size=size.tiny)
+    
+    table.cell(hud, 0, 2, "Pivot Low (BOS)", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 2, plValid ? str.tostring(lastPivotLow, "#.##") : "None", text_color=#22c55e, text_size=size.tiny)
+    
+    table.cell(hud, 0, 3, "RSI (14)", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 3, str.tostring(rsi, "#.#"), text_color=rsi >= 53 ? #22c55e : rsi <= 47 ? #ef4444 : color.white, text_size=size.tiny)
+    
+    table.cell(hud, 0, 4, "1H Trend", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 4, htfClose > htfEma200 ? "BULLISH" : "BEARISH", text_color=htfClose > htfEma200 ? #22c55e : #ef4444, text_size=size.tiny)
+    
+    table.cell(hud, 0, 5, "ATR (14)", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 5, str.tostring(atr, "#.##"), text_color=color.white, text_size=size.tiny)
+    
+    table.cell(hud, 0, 6, "Setup Score", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 6, str.tostring(math.max(bullScore, bearScore), "#") + " (" + (bullScore > bearScore ? bullGrade : bearGrade) + ")", 
+               text_color=#38bdf8, text_size=size.tiny)
+
+// =============================================================================
+// ALERTS
+// =============================================================================
+if buySignal
+    alert('{"brand":"Hemanth Ranam","system":"TradingView","strategy":"Market Structure Momentum Pro","signal":"BUY","symbol":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","entry":' + str.tostring(refEntry, "#.##") + ',"stop_loss":' + str.tostring(refSL, "#.##") + ',"take_profit_1":' + str.tostring(refTP, "#.##") + ',"score":' + str.tostring(bullScore, "#") + ',"grade":"' + bullGrade + '","timestamp":' + str.tostring(time) + '}', alert.freq_once_per_bar_close)
+
+if sellSignal
+    alert('{"brand":"Hemanth Ranam","system":"TradingView","strategy":"Market Structure Momentum Pro","signal":"SELL","symbol":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","entry":' + str.tostring(refEntry, "#.##") + ',"stop_loss":' + str.tostring(refSL, "#.##") + ',"take_profit_1":' + str.tostring(refTP, "#.##") + ',"score":' + str.tostring(bearScore, "#") + ',"grade":"' + bearGrade + '","timestamp":' + str.tostring(time) + '}', alert.freq_once_per_bar_close)

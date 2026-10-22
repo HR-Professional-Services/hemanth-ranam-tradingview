@@ -1,0 +1,235 @@
+//@version=6
+indicator("HR Volatility Expansion Breakout Pro [Indicator]", 
+          shorttitle="HR Vol Breakout", 
+          overlay=true, 
+          max_labels_count=500, 
+          max_boxes_count=200, 
+          max_lines_count=200)
+
+// =============================================================================
+// HR VOLATILITY EXPANSION BREAKOUT PRO — COMMERCIAL INDICATOR v1.0
+// Product ID: HR-PRD-03
+// System: HR TradingView Suite | ScaleNova / HR Professional Services
+// Author: Hemanth Ranam | Developed by Antigravity Engine
+//
+// METHODOLOGY:
+//   - Identifies consolidation compression / squeeze boxes over InpCompressionBars (20)
+//   - Validates volatility squeeze: Box Height <= ATR * InpMaxCompressionATR (1.8)
+//   - Verifies volume expansion: Volume >= Average Volume * InpMinVolumeMultiplier (1.25)
+//   - Confirms breakout: Trigger candle opens near/inside box and closes outside box
+//   - Calculates dynamic stop loss at box midpoint or candle extreme with ATR buffer
+//   - Aligned directly with MT5 EA: VOLATILITY_EXPANSION_BREAKOUT_EA.mq5
+// =============================================================================
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INPUT GROUPS
+// ─────────────────────────────────────────────────────────────────────────────
+var string GRP_GEN    = "● General Execution"
+var string GRP_SQZ    = "● Volatility Compression & Squeeze"
+var string GRP_VOL    = "● Volume & Expansion Filters"
+var string GRP_HTF    = "● Higher-Timeframe Filter"
+var string GRP_SCORE  = "● Signal Quality Scoring"
+var string GRP_RISK   = "● Risk Reference Levels"
+var string GRP_DASH   = "● Dashboard & Telemetry"
+var string GRP_VIS    = "● Visual Appearance"
+
+// ─── GENERAL EXECUTION ───────────────────────────────────────────────────────
+enableLong  = input.bool(true,  "Enable Bullish Breakouts", group=GRP_GEN)
+enableShort = input.bool(true,  "Enable Bearish Breakouts", group=GRP_GEN)
+
+// ─── VOLATILITY COMPRESSION & SQUEEZE ────────────────────────────────────────
+compressionBars   = input.int(20,    "Compression Lookback Window", minval=5, maxval=100, group=GRP_SQZ,
+     tooltip="Number of bars evaluated for consolidation range box. Aligned with MT5 InpCompressionBars=20.")
+maxCompressionAtr = input.float(1.8, "Max Range / ATR Ratio (Squeeze)", minval=0.5, step=0.1, group=GRP_SQZ,
+     tooltip="Box height must be within this multiple of ATR to qualify as a squeeze. Aligned with MT5 InpMaxCompressionATR=1.8.")
+atrLen            = input.int(14,    "ATR Period", minval=1, group=GRP_SQZ)
+
+// ─── VOLUME & EXPANSION FILTERS ──────────────────────────────────────────────
+useVolumeFilter   = input.bool(false, "Enable Volume Expansion Filter", group=GRP_VOL,
+     tooltip="Requires breakout bar volume to exceed moving average. Default OFF for universal compatibility across forex spot feeds.")
+minVolumeMult     = input.float(1.25, "Min Volume Expansion Multiplier", minval=1.0, step=0.05, group=GRP_VOL,
+     tooltip="Breakout bar volume must be at least this multiple of 20-bar average. Aligned with MT5 InpMinVolumeMultiplier=1.25.")
+
+// ─── HIGHER-TIMEFRAME FILTER ─────────────────────────────────────────────────
+useHtfFilter = input.bool(true,  "Enable HTF Trend Filter", group=GRP_HTF,
+     tooltip="Enforces higher-timeframe trend alignment to reduce false breakout whipsaws.")
+htfTF        = input.timeframe("60", "Higher Timeframe", group=GRP_HTF)
+htfEmaLen    = input.int(200, "HTF Baseline EMA", minval=10, group=GRP_HTF)
+
+// ─── SIGNAL QUALITY SCORING ──────────────────────────────────────────────────
+minEntryScore  = input.int(70, "Minimum Entry Quality Score (0–100)", minval=50, maxval=95, step=5, group=GRP_SCORE)
+minSignalGrade = input.string("A and Above", "Minimum Signal Grade",
+     options=["A+ Only", "A and Above", "B and Above", "All Signals"], group=GRP_SCORE)
+
+// ─── RISK REFERENCE LEVELS ───────────────────────────────────────────────────
+showRiskLevels = input.bool(true,  "Show SL / TP Indicative Levels", group=GRP_RISK)
+slMode         = input.string("Box Midpoint", "Stop Loss Placement", 
+     options=["Box Midpoint", "Candle Extreme", "Tighter of Both"], group=GRP_RISK,
+     tooltip="Box Midpoint aligns with MT5 EA default logic.")
+slBufferAtr    = input.float(0.1,  "SL Buffer (× ATR)", minval=0.0, step=0.05, group=GRP_RISK)
+rrMultiplier   = input.float(2.5,  "Target Reward-to-Risk (R:R)", minval=1.0, step=0.1, group=GRP_RISK,
+     tooltip="Target R:R ratio. Aligned with MT5 InpRewardToRiskRatio=2.5.")
+
+// ─── DASHBOARD & VISUALS ─────────────────────────────────────────────────────
+showHud        = input.bool(true,  "Display Telemetry HUD", group=GRP_DASH)
+hudPos         = input.string("Top Right", "HUD Position",
+     options=["Top Right", "Bottom Right", "Top Left", "Bottom Left"], group=GRP_DASH)
+showBoxes      = input.bool(true,  "Plot Consolidation Squeeze Box", group=GRP_VIS)
+colorBull      = input.color(#22c55e, "Bullish Signal Color", group=GRP_VIS)
+colorBear      = input.color(#ef4444, "Bearish Signal Color", group=GRP_VIS)
+
+// =============================================================================
+// CALCULATIONS & INDICATOR VALUES
+// =============================================================================
+atr = ta.atr(atrLen)
+
+// HTF Security Request (Strict [1] indexing and lookahead_off)
+htfClose  = request.security(syminfo.tickerid, htfTF, close[1], barmerge.gaps_off, barmerge.lookahead_off)
+htfEma200 = request.security(syminfo.tickerid, htfTF, ta.ema(close, htfEmaLen)[1], barmerge.gaps_off, barmerge.lookahead_off)
+htfBullOk = not useHtfFilter or (htfClose > htfEma200)
+htfBearOk = not useHtfFilter or (htfClose < htfEma200)
+
+// 1. Squeeze Box Identification (Bars 1 to compressionBars)
+boxHigh = ta.highest(high[1], compressionBars)
+boxLow  = ta.lowest(low[1],   compressionBars)
+boxHeight = boxHigh - boxLow
+boxMid = (boxHigh + boxLow) / 2.0
+
+// Volatility Compression Ratio
+compressionRatio = atr > 0 ? (boxHeight / atr) : 0.0
+isCompressed = compressionRatio <= maxCompressionAtr
+
+// Volume Expansion Check
+avgVolume = ta.sma(volume, compressionBars)
+volumeExpanded = not useVolumeFilter or na(volume) or (volume >= avgVolume * minVolumeMult)
+
+// 2. Breakout Conditions
+// Bullish: Candle opens inside/near box and closes firmly ABOVE boxHigh with green body
+bullBreakout = enableLong and (close > boxHigh) and (close > open) and isCompressed and 
+               volumeExpanded and htfBullOk and barstate.isconfirmed
+
+// Bearish: Candle opens inside/near box and closes firmly BELOW boxLow with red body
+bearBreakout = enableShort and (close < boxLow) and (close < open) and isCompressed and 
+               volumeExpanded and htfBearOk and barstate.isconfirmed
+
+// =============================================================================
+// QUALITY SCORING ENGINE (0–100)
+// =============================================================================
+calcQualityScore(isBull) =>
+    float s = 0.0
+    // Squeeze Tightness Score (0-35): Tighter squeeze = higher explosive potential
+    s += compressionRatio <= 1.2 ? 35.0 : compressionRatio <= 1.5 ? 25.0 : 15.0
+    
+    // Volume Expansion Score (0-25)
+    float volRatio = (avgVolume > 0 and not na(volume)) ? (volume / avgVolume) : 1.0
+    s += volRatio >= 1.5 ? 25.0 : volRatio >= 1.25 ? 18.0 : 10.0
+    
+    // HTF Alignment Score (0-25)
+    s += isBull ? (htfClose > htfEma200 ? 25.0 : 0.0) : (htfClose < htfEma200 ? 25.0 : 0.0)
+    
+    // Candle Range Expansion Score (0-15)
+    s += (high - low) >= atr ? 15.0 : 5.0
+    math.min(100.0, s)
+
+bullScore = calcQualityScore(true)
+bearScore = calcQualityScore(false)
+
+getGrade(score) =>
+    score >= 90.0 ? "A+" : score >= 75.0 ? "A" : score >= 60.0 ? "B" : "C"
+
+bullGrade = getGrade(bullScore)
+bearGrade = getGrade(bearScore)
+
+isGradeAllowed(grade) =>
+    switch minSignalGrade
+        "A+ Only"     => grade == "A+"
+        "A and Above" => grade == "A+" or grade == "A"
+        "B and Above" => grade == "A+" or grade == "A" or grade == "B"
+        => true
+
+// Cooldown & Single Signal Gate
+var int lastBullBar = -100
+var int lastBearBar = -100
+cooldownBars = 5
+canBull = (bar_index - lastBullBar) >= cooldownBars
+canBear = (bar_index - lastBearBar) >= cooldownBars
+
+buySignal  = bullBreakout and canBull and (bullScore >= minEntryScore) and isGradeAllowed(bullGrade)
+sellSignal = bearBreakout and canBear and (bearScore >= minEntryScore) and isGradeAllowed(bearGrade)
+
+if buySignal
+    lastBullBar := bar_index
+if sellSignal
+    lastBearBar := bar_index
+
+// Reference Risk Tracking
+var float refEntry = na
+var float refSL    = na
+var float refTP    = na
+
+if buySignal
+    refEntry := close
+    float baseSL = slMode == "Box Midpoint" ? boxMid : slMode == "Candle Extreme" ? low : math.max(boxMid, low)
+    refSL := baseSL - (atr * slBufferAtr)
+    refTP := refEntry + ((refEntry - refSL) * rrMultiplier)
+
+if sellSignal
+    refEntry := close
+    float baseSL = slMode == "Box Midpoint" ? boxMid : slMode == "Candle Extreme" ? high : math.min(boxMid, high)
+    refSL := baseSL + (atr * slBufferAtr)
+    refTP := refEntry - ((refSL - refEntry) * rrMultiplier)
+
+// =============================================================================
+// VISUAL PLOTS
+// =============================================================================
+plot(showBoxes ? boxHigh : na, "Squeeze Box High", color=color.new(#ef4444, 40), linewidth=1, style=plot.style_stepline)
+plot(showBoxes ? boxLow  : na, "Squeeze Box Low",  color=color.new(#22c55e, 40), linewidth=1, style=plot.style_stepline)
+plot(showBoxes ? boxMid  : na, "Squeeze Box Mid",  color=color.new(#94a3b8, 60), linewidth=1, style=plot.style_circles)
+
+plotshape(buySignal,  title="BUY Breakout Marker",  style=shape.triangleup,   location=location.belowbar, color=colorBull, size=size.small)
+plotshape(sellSignal, title="SELL Breakout Marker", style=shape.triangledown, location=location.abovebar, color=colorBear, size=size.small)
+
+plot(showRiskLevels and not na(refSL) ? refSL : na, "SL Reference", color=color.new(#ef4444, 50), style=plot.style_circles)
+plot(showRiskLevels and not na(refTP) ? refTP : na, "TP Reference", color=color.new(#22c55e, 50), style=plot.style_circles)
+
+// =============================================================================
+// TELEMETRY HUD
+// =============================================================================
+if showHud and barstate.islast
+    tablePos = hudPos == "Top Right"    ? position.top_right : 
+               hudPos == "Bottom Right" ? position.bottom_right : 
+               hudPos == "Top Left"     ? position.top_left : position.bottom_left
+               
+    var table hud = table.new(tablePos, 2, 7, bgcolor=color.new(#0f172a, 15), border_color=color.new(#334155, 30), border_width=1)
+    
+    table.cell(hud, 0, 0, "HEMANTH RANAM", bgcolor=color.new(#1e293b, 10), text_color=#38bdf8, text_size=size.small)
+    table.cell(hud, 1, 0, "VOL BREAKOUT PRO", bgcolor=color.new(#1e293b, 10), text_color=color.white, text_size=size.small)
+    
+    table.cell(hud, 0, 1, "Squeeze State", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 1, isCompressed ? "COMPRESSED (" + str.tostring(compressionRatio, "#.##") + "x)" : "NORMAL", 
+               text_color=isCompressed ? #22c55e : #94a3b8, text_size=size.tiny)
+    
+    table.cell(hud, 0, 2, "Box Range", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 2, str.tostring(boxHeight, "#.##") + " pts", text_color=color.white, text_size=size.tiny)
+    
+    table.cell(hud, 0, 3, "1H Trend", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 3, htfClose > htfEma200 ? "BULLISH" : "BEARISH", text_color=htfClose > htfEma200 ? #22c55e : #ef4444, text_size=size.tiny)
+    
+    table.cell(hud, 0, 4, "ATR (14)", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 4, str.tostring(atr, "#.##"), text_color=color.white, text_size=size.tiny)
+    
+    table.cell(hud, 0, 5, "Setup Score", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 5, str.tostring(math.max(bullScore, bearScore), "#") + " (" + (bullScore > bearScore ? bullGrade : bearGrade) + ")", 
+               text_color=#38bdf8, text_size=size.tiny)
+               
+    table.cell(hud, 0, 6, "Volume State", text_color=#94a3b8, text_size=size.tiny)
+    table.cell(hud, 1, 6, volumeExpanded ? "EXPANDED" : "NORMAL", text_color=volumeExpanded ? #22c55e : #94a3b8, text_size=size.tiny)
+
+// =============================================================================
+// ALERTS
+// =============================================================================
+if buySignal
+    alert('{"brand":"Hemanth Ranam","system":"TradingView","strategy":"Volatility Expansion Breakout Pro","signal":"BUY","symbol":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","entry":' + str.tostring(refEntry, "#.##") + ',"stop_loss":' + str.tostring(refSL, "#.##") + ',"take_profit_1":' + str.tostring(refTP, "#.##") + ',"score":' + str.tostring(bullScore, "#") + ',"grade":"' + bullGrade + '","timestamp":' + str.tostring(time) + '}', alert.freq_once_per_bar_close)
+
+if sellSignal
+    alert('{"brand":"Hemanth Ranam","system":"TradingView","strategy":"Volatility Expansion Breakout Pro","signal":"SELL","symbol":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","entry":' + str.tostring(refEntry, "#.##") + ',"stop_loss":' + str.tostring(refSL, "#.##") + ',"take_profit_1":' + str.tostring(refTP, "#.##") + ',"score":' + str.tostring(bearScore, "#") + ',"grade":"' + bearGrade + '","timestamp":' + str.tostring(time) + '}', alert.freq_once_per_bar_close)

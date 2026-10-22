@@ -1,0 +1,615 @@
+//@version=6
+indicator("HR EMA Pullback Pro [Indicator]", 
+          shorttitle="HR EMA Pullback",
+          overlay=true,
+          max_labels_count=500,
+          max_boxes_count=200,
+          max_lines_count=200)
+
+// ============================================================================
+// HR EMA PULLBACK PRO — COMMERCIAL INDICATOR  v1.0
+// Product: HR TradingView | ScaleNova / HR Professional Services
+// Method : 9/21/200 EMA Alignment + Pullback Zone + Candle Confirmation
+// Author : Hemanth Ranam | Developed by Antigravity Engine
+//
+// NON-REPAINTING:
+//   - All signals fire only on barstate.isconfirmed (closed bars only)
+//   - HTF data uses close[1] and ema[1] with lookahead_off
+//   - Pivot-based structure has inherent N-bar confirmation delay (documented)
+//   - Historical signal markers do not repaint after bar close
+//
+// LIMITATIONS:
+//   - Session filter OFF by default (works across all markets and timeframes)
+//   - VWAP-based features require intraday charts; reset daily on standard feeds
+//   - Volume data unavailable on some forex feeds; volume-based scoring degrades gracefully
+//   - HTF filter default is 60 (1H); adjust for daily/weekly chart use
+//   - ATR-based SL/TP levels are reference guides only, not executable broker orders
+//   - Compilation and behavior must be verified in TradingView Pine Editor
+//
+// RISK DISCLOSURE:
+//   Signals represent algorithmically defined conditions. Past signal occurrence
+//   does not guarantee future profitability. This indicator does not constitute
+//   financial advice. Always apply your own risk management.
+// ============================================================================
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INPUT GROUPS
+// ─────────────────────────────────────────────────────────────────────────────
+var string GRP_GEN    = "● General"
+var string GRP_EMA    = "● EMA Configuration"
+var string GRP_HTF    = "● Higher-Timeframe Filter"
+var string GRP_PULL   = "● Pullback & Candle Confirmation"
+var string GRP_REGIME = "● Market Regime Filters"
+var string GRP_SCORE  = "● Signal Quality & Scoring"
+var string GRP_RISK   = "● Risk Reference Levels"
+var string GRP_SESS   = "● Session Filter (Optional)"
+var string GRP_ALERT  = "● Alerts"
+var string GRP_DASH   = "● Dashboard"
+var string GRP_VIS    = "● Visual Appearance"
+
+// ─── GENERAL ────────────────────────────────────────────────────────────────
+enableLong  = input.bool(true,  "Enable BUY Signals",  group=GRP_GEN,
+     tooltip="When disabled, no BUY labels or long alerts are emitted.")
+enableShort = input.bool(true,  "Enable SELL Signals", group=GRP_GEN,
+     tooltip="When disabled, no SELL labels or short alerts are emitted.")
+
+// ─── EMA CONFIGURATION ──────────────────────────────────────────────────────
+ema9Len   = input.int(9,   "Fast EMA Length",   minval=1, group=GRP_EMA,
+     tooltip="Short-term momentum EMA. Default 9.")
+ema21Len  = input.int(21,  "Mid EMA Length",    minval=1, group=GRP_EMA,
+     tooltip="Pullback target EMA. Price pulling back to this zone is the core setup.")
+ema200Len = input.int(200, "Trend Baseline EMA",minval=1, group=GRP_EMA,
+     tooltip="Long-term trend filter. BUY only when above, SELL only when below.")
+
+// ─── HIGHER-TIMEFRAME FILTER ─────────────────────────────────────────────────
+useHtfFilter = input.bool(true,  "Enable HTF Trend Filter",     group=GRP_HTF,
+     tooltip="Requires the higher timeframe to agree with the signal direction. Reduces counter-trend trades.")
+htfTF        = input.timeframe("60", "Higher Timeframe",        group=GRP_HTF,
+     tooltip="Default: 60 (1H). For daily charts use 'W' or 'M'. For weekly charts use 'M'.")
+htfEmaLen    = input.int(200, "HTF EMA Period",    minval=1,    group=GRP_HTF,
+     tooltip="EMA applied on the higher timeframe. Default 200.")
+
+// ─── PULLBACK & CANDLE CONFIRMATION ──────────────────────────────────────────
+pbZoneMode = input.string("EMA 9-21 Zone", "Pullback Target Zone",
+     options=["EMA 9-21 Zone", "EMA 9 Retest", "EMA 21 Retest"], group=GRP_PULL,
+     tooltip="EMA 9-21 Zone: price wick touches the zone between EMA 9 and EMA 21.\nEMA 9 Retest: wick touches EMA 9 directly.\nEMA 21 Retest: wick touches EMA 21 directly.")
+requireCloseBeyondEma = input.bool(true,  "Require Close Beyond EMA 9",    group=GRP_PULL,
+     tooltip="BUY: candle must close above EMA 9. SELL: must close below EMA 9.")
+useEngulfing = input.bool(true, "Require Engulfing Candle",                group=GRP_PULL,
+     tooltip="Current bar must engulf the previous bar's body in the signal direction.")
+useWickRejection = input.bool(false, "Require Rejection Wick",             group=GRP_PULL,
+     tooltip="Optional: requires a long wick rejecting the pullback zone.")
+minWickPct = input.float(35.0, "Min Rejection Wick (% of Bar Range)",
+     minval=10.0, maxval=80.0, step=5.0, group=GRP_PULL,
+     tooltip="Minimum wick length as a percentage of the full bar range.")
+useStrongBody = input.bool(false, "Require Strong Momentum Body",          group=GRP_PULL,
+     tooltip="Optional: requires the candle body to be a large proportion of the bar range.")
+minBodyPct = input.float(55.0, "Min Candle Body (% of Bar Range)",
+     minval=10.0, maxval=90.0, step=5.0, group=GRP_PULL,
+     tooltip="Minimum body size as a percentage of the full bar range.")
+
+// ─── MARKET REGIME FILTERS ───────────────────────────────────────────────────
+useChopFilter = input.bool(true,  "Enable Chop Filter",                    group=GRP_REGIME,
+     tooltip="Blocks signals when the EMA 9/21 gap is too small relative to ATR, indicating a sideways/choppy market.")
+chopThreshold = input.float(0.06, "Min EMA Gap (× ATR)",
+     minval=0.01, step=0.01,                                               group=GRP_REGIME,
+     tooltip="EMA 9/21 separation must exceed this multiple of ATR. Lower = more permissive.")
+useExtFilter  = input.bool(true,  "Enable Overextension Filter",           group=GRP_REGIME,
+     tooltip="Blocks signals when price is too far from EMA 9, reducing late-entry risk.")
+maxExtAtr = input.float(2.5, "Max Price Distance to EMA 9 (× ATR)",
+     minval=1.0, step=0.1,                                                 group=GRP_REGIME,
+     tooltip="If price is more than this many ATRs from EMA 9, the signal is suppressed.")
+slopeLookback = input.int(3, "EMA Slope Lookback (Bars)",
+     minval=1, maxval=10,                                                  group=GRP_REGIME,
+     tooltip="Number of bars used to calculate EMA slope direction.")
+useMsFilter = input.bool(false, "Enable Market Structure Filter",          group=GRP_REGIME,
+     tooltip="Requires price to be beyond the most recent confirmed swing pivot in the signal direction.")
+msPivotLen  = input.int(5, "Market Structure Pivot Lookback",
+     minval=2, maxval=50,                                                  group=GRP_REGIME,
+     tooltip="Left and right bars for pivot high/low detection. Higher = fewer but more significant pivots. Note: introduces N-bar confirmation lag.")
+
+// ─── SIGNAL QUALITY & SCORING ────────────────────────────────────────────────
+minEntryScore  = input.int(70, "Minimum Entry Quality Score (0–100)",
+     minval=50, maxval=95, step=5,                                         group=GRP_SCORE,
+     tooltip="Signals with a quality score below this threshold are suppressed. Raise to filter lower-conviction setups.")
+minSignalGrade = input.string("A and Above", "Minimum Signal Grade",
+     options=["A+ Only", "A and Above", "B and Above", "All Signals"],    group=GRP_SCORE,
+     tooltip="A+ = Score ≥ 90 | A = Score ≥ 75 | B = Score ≥ 60 | C = Score < 60")
+showScoreOnLabel  = input.bool(true,  "Show Score on Signal Label",        group=GRP_SCORE)
+showGradeOnLabel  = input.bool(true,  "Show Grade on Signal Label",        group=GRP_SCORE)
+
+// ─── RISK REFERENCE LEVELS ───────────────────────────────────────────────────
+showRiskLevels  = input.bool(true,   "Show SL / TP Reference Lines",       group=GRP_RISK,
+     tooltip="Plots indicative stop-loss and take-profit reference lines based on ATR. These are NOT executable broker orders.")
+atrLen       = input.int(14,   "ATR Period",                               group=GRP_RISK)
+slAtrMult    = input.float(1.5, "Stop-Loss ATR Multiplier",  step=0.1,    group=GRP_RISK,
+     tooltip="SL reference = entry ± (ATR × multiplier). Adjust per instrument volatility.")
+tp1RrMult    = input.float(1.5, "Take-Profit 1 R:R Ratio",  step=0.1,    group=GRP_RISK,
+     tooltip="TP1 = entry ± (risk × R:R multiplier). Default 1.5:1.")
+tp2RrMult    = input.float(2.5, "Take-Profit 2 R:R Ratio",  step=0.1,    group=GRP_RISK,
+     tooltip="TP2 = entry ± (risk × R:R multiplier). Default 2.5:1.")
+
+// ─── SESSION FILTER (OPTIONAL) ───────────────────────────────────────────────
+useSessionFilter = input.bool(false, "Enable Session Filter",              group=GRP_SESS,
+     tooltip="OFF by default. Works across all markets. Enable to restrict signals to specific trading hours.")
+prefSessions = input.string("London + NY", "Preferred Session Window",
+     options=["All Active Sessions", "London Only", "New York Only", "London + NY", "Off — Use Custom"],
+     group=GRP_SESS,
+     tooltip="Selects which sessions generate signals. 'London + NY' covers the highest-liquidity period for forex and metals.")
+customSession = input.session("0700-1700:23456", "Custom Session (UTC)",   group=GRP_SESS,
+     tooltip="Used only when 'Off — Use Custom' is selected above.")
+tzOffset      = input.int(0, "UTC Offset (Hours)", minval=-12, maxval=14, group=GRP_SESS,
+     tooltip="Adjust if your broker feed uses a non-UTC timezone.")
+
+// ─── ALERTS ──────────────────────────────────────────────────────────────────
+alertOnBuy    = input.bool(true, "Fire Alert on BUY Signal",  group=GRP_ALERT)
+alertOnSell   = input.bool(true, "Fire Alert on SELL Signal", group=GRP_ALERT)
+alertOnAPlus  = input.bool(false,"Fire Alert on A+ Grade Only",group=GRP_ALERT,
+     tooltip="When enabled, only A+ grade signals trigger alerts, regardless of the minimum grade setting.")
+
+// ─── DASHBOARD ───────────────────────────────────────────────────────────────
+showDash      = input.bool(true,        "Show Dashboard",                  group=GRP_DASH)
+showAdvDash   = input.bool(true,        "Show Advanced Metrics",           group=GRP_DASH)
+dashPos       = input.string("Top Right","Dashboard Position",
+     options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"],     group=GRP_DASH)
+dashSize      = input.string("Small",    "Dashboard Text Size",
+     options=["Tiny", "Small", "Normal"],                                  group=GRP_DASH)
+
+// ─── VISUAL APPEARANCE ───────────────────────────────────────────────────────
+showEma9      = input.bool(true,  "Show EMA 9",        group=GRP_VIS)
+showEma21     = input.bool(true,  "Show EMA 21",       group=GRP_VIS)
+showEma200    = input.bool(true,  "Show EMA 200",      group=GRP_VIS)
+showEmaCloud  = input.bool(true,  "Show EMA Zone Cloud (9–21)", group=GRP_VIS)
+showRlLevels  = input.bool(true,  "Show ATR-Based Risk Lines on Signal", group=GRP_VIS)
+colorEma9     = input.color(#2196f3, "EMA 9 Color",    group=GRP_VIS)
+colorEma21    = input.color(#ff5252, "EMA 21 Color",   group=GRP_VIS)
+colorEma200   = input.color(#ffffff, "EMA 200 Color",  group=GRP_VIS)
+colorBuy      = input.color(#00e676, "BUY Signal Color",  group=GRP_VIS)
+colorSell     = input.color(#ff1744, "SELL Signal Color", group=GRP_VIS)
+showDayDiv    = input.bool(true,  "Show Daily Divider Line", group=GRP_VIS)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CORE CALCULATIONS
+// ─────────────────────────────────────────────────────────────────────────────
+n = bar_index
+
+// EMAs (current bar)
+ema9   = ta.ema(close, ema9Len)
+ema21  = ta.ema(close, ema21Len)
+ema200 = ta.ema(close, ema200Len)
+atr    = ta.atr(atrLen)
+
+// ─── HTF FILTER (NON-REPAINTING) ─────────────────────────────────────────────
+// Both use [1] indexing to request the PREVIOUS CONFIRMED HTF BAR's value.
+// lookahead_off prevents future-data access during historical calculation.
+// See docs/architecture/SIGNAL-CONTRACT.md §3 for full explanation.
+float htf200   = request.security(syminfo.tickerid, htfTF,
+     ta.ema(close, htfEmaLen)[1], barmerge.gaps_off, barmerge.lookahead_off)
+float htfClose = request.security(syminfo.tickerid, htfTF,
+     close[1], barmerge.gaps_off, barmerge.lookahead_off)
+
+htfBull = not useHtfFilter or (htfClose > htf200)
+htfBear = not useHtfFilter or (htfClose < htf200)
+htfStateText = not useHtfFilter ? "FILTER OFF" : 
+     (htfClose > htf200 ? "BULL" : htfClose < htf200 ? "BEAR" : "NEUTRAL")
+
+// ─── EMA SLOPES & TREND STATE ────────────────────────────────────────────────
+ema9Slope  = (ema9  - ema9[slopeLookback])  / slopeLookback
+ema21Slope = (ema21 - ema21[slopeLookback]) / slopeLookback
+
+// Full alignment: 9 > 21 > 200 (bull) or 9 < 21 < 200 (bear)
+bullStack = ema9 > ema21 and ema21 > ema200
+bearStack = ema9 < ema21 and ema21 < ema200
+
+// Partial trend: close on correct side of 200 and 9/21 aligned
+bullTrend = close > ema200 and ema9 > ema21
+bearTrend = close < ema200 and ema9 < ema21
+
+// Strong trend: full stack + slope confirmation
+strongBull = bullStack and close > ema9 and ema9Slope > 0 and ema21Slope > 0
+strongBear = bearStack and close < ema9 and ema9Slope < 0 and ema21Slope < 0
+
+trendText = strongBull ? "STRONG BULL" : bullTrend ? "BULL" : 
+            strongBear ? "STRONG BEAR" : bearTrend ? "BEAR" : "NEUTRAL"
+
+// ─── EMA GAP & REGIME FILTERS ────────────────────────────────────────────────
+emaGap   = math.abs(ema9 - ema21)
+gapRatio = atr > 0 ? (emaGap / atr) : 0.0
+
+// Choppy: EMA 9/21 gap is too compressed relative to ATR
+isChoppy   = useChopFilter and (gapRatio < chopThreshold)
+
+// Extended: price is too far from EMA 9 — late entry risk
+distEma9   = math.abs(close - ema9)
+isExtended = useExtFilter and (atr > 0 and (distEma9 / atr) > maxExtAtr)
+
+regimeText = isChoppy ? "CHOPPY" : isExtended ? "EXTENDED" : "TRENDING"
+
+// ─── EMA HEALTH SCORE (0–100) ────────────────────────────────────────────────
+// Weighted composite of slope quality, stacking, gap, and price position.
+// Used as 25% of the entry quality score.
+float slopeScore = ((bullTrend and ema9Slope > 0 and ema21Slope > 0) or 
+                    (bearTrend and ema9Slope < 0 and ema21Slope < 0)) ? 30.0 : 
+                   ((ema9Slope != 0 or ema21Slope != 0) ? 15.0 : 0.0)
+float stackScore = (bullStack or bearStack) ? 30.0 : 
+                   ((bullTrend or bearTrend) ? 20.0 : 0.0)
+float gapScore   = gapRatio >= 0.15 ? 25.0 : gapRatio >= 0.08 ? 18.0 : 
+                   gapRatio >= 0.04 ? 10.0 : 0.0
+float posScore   = ((bullTrend and low > ema200) or (bearTrend and high < ema200)) ? 15.0 : 5.0
+
+healthScore = math.min(100.0, slopeScore + stackScore + gapScore + posScore)
+healthText  = healthScore >= 90 ? "Strong" : healthScore >= 75 ? "Healthy" : 
+              healthScore >= 60 ? "Developing" : healthScore >= 40 ? "Neutral" : "Weak"
+
+// ─── SESSION ENGINE ───────────────────────────────────────────────────────────
+var string tz = "UTC"
+if tzOffset != 0
+    tz := str.format("UTC{0}{1}", tzOffset >= 0 ? "+" : "-", math.abs(tzOffset))
+
+is_ny  = math.sign(nz(time(timeframe.period, "1300-2200", tz)))
+is_ldn = math.sign(nz(time(timeframe.period, "0700-1600", tz)))
+is_tyo = math.sign(nz(time(timeframe.period, "0000-0900", tz)))
+is_cus = not na(time(timeframe.period, customSession))
+
+sessionAllowed = not useSessionFilter or switch prefSessions
+    "London Only"          => is_ldn > 0
+    "New York Only"        => is_ny  > 0
+    "London + NY"          => (is_ldn > 0) or (is_ny > 0)
+    "All Active Sessions"  => (is_ny > 0) or (is_ldn > 0) or (is_tyo > 0)
+    "Off — Use Custom"     => is_cus
+    => true
+
+activeSessionName = is_ldn > 0 ? "London" : is_ny > 0 ? "New York" : 
+                    is_tyo > 0 ? "Tokyo" : "Off-Hours"
+
+// ─── MARKET STRUCTURE FILTER ─────────────────────────────────────────────────
+// Note: pivothigh/pivotlow with msPivotLen introduces an msPivotLen-bar lag.
+// The pivot is only confirmed after msPivotLen bars have elapsed past the pivot bar.
+// This is an inherent property of pivot detection, not a repainting issue.
+// See docs/architecture/SIGNAL-CONTRACT.md §4 for full explanation.
+ph = ta.pivothigh(high, msPivotLen, msPivotLen)
+pl = ta.pivotlow(low,   msPivotLen, msPivotLen)
+
+var float lastPH = na
+var float lastPL = na
+if not na(ph)
+    lastPH := ph
+if not na(pl)
+    lastPL := pl
+
+msBullOk = not useMsFilter or (close > nz(lastPL, low))
+msBearOk = not useMsFilter or (close < nz(lastPH, high))
+
+// ─── PULLBACK ZONE DETECTION ─────────────────────────────────────────────────
+inZoneBull = switch pbZoneMode
+    "EMA 9-21 Zone" => low <= math.max(ema9, ema21) and low >= math.min(ema9, ema21)
+    "EMA 9 Retest"  => low <= ema9 and close > ema21
+    "EMA 21 Retest" => low <= ema21 and close >= ema21
+    => low <= ema9
+
+inZoneBear = switch pbZoneMode
+    "EMA 9-21 Zone" => high >= math.min(ema9, ema21) and high <= math.max(ema9, ema21)
+    "EMA 9 Retest"  => high >= ema9 and close < ema21
+    "EMA 21 Retest" => high >= ema21 and close <= ema21
+    => high >= ema9
+
+// ─── CANDLE CONFIRMATION ENGINE ──────────────────────────────────────────────
+candleRange = math.max(high - low, syminfo.mintick)
+
+bullEngulfing = close > open and close[1] < open[1] and close > high[1]
+bearEngulfing = close < open and close[1] > open[1] and close < low[1]
+
+lowerWick = math.min(open, close) - low
+upperWick = high - math.max(open, close)
+
+bullWickOk = (lowerWick / candleRange) >= (minWickPct / 100.0)
+bearWickOk = (upperWick / candleRange) >= (minWickPct / 100.0)
+
+candleBody = math.abs(close - open)
+bullBodyOk = close > open and (candleBody / candleRange) >= (minBodyPct / 100.0)
+bearBodyOk = close < open and (candleBody / candleRange) >= (minBodyPct / 100.0)
+
+bullCandleOk = (not requireCloseBeyondEma or close > ema9) and
+               (not useEngulfing      or bullEngulfing)     and
+               (not useWickRejection  or bullWickOk)        and
+               (not useStrongBody     or bullBodyOk)
+
+bearCandleOk = (not requireCloseBeyondEma or close < ema9) and
+               (not useEngulfing      or bearEngulfing)     and
+               (not useWickRejection  or bearWickOk)        and
+               (not useStrongBody     or bearBodyOk)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENTRY QUALITY SCORING ENGINE (0–100)
+// ─────────────────────────────────────────────────────────────────────────────
+// Component weights: EMA Health 25% | Structure 20% | HTF 20% | Candle 15% | MS 10% | Session 10%
+calcQualityScore(isLong) =>
+    float s = 0.0
+    s += healthScore * 0.25
+    s += (isLong ? (bullStack ? 20.0 : bullTrend ? 12.0 : 0.0) : 
+                   (bearStack ? 20.0 : bearTrend ? 12.0 : 0.0))
+    s += (isLong ? (htfClose > htf200 ? 20.0 : 0.0) : 
+                   (htfClose < htf200 ? 20.0 : 0.0))
+    s += (isLong ? (bullEngulfing ? 15.0 : 8.0) : 
+                   (bearEngulfing ? 15.0 : 8.0))
+    s += (isLong ? (msBullOk ? 10.0 : 0.0) : (msBearOk ? 10.0 : 0.0))
+    s += sessionAllowed ? 10.0 : 0.0
+    math.min(100.0, s)
+
+buyQuality  = calcQualityScore(true)
+sellQuality = calcQualityScore(false)
+
+getGrade(score) =>
+    score >= 90.0 ? "A+" : score >= 75.0 ? "A" : score >= 60.0 ? "B" : "C"
+
+buyGrade  = getGrade(buyQuality)
+sellGrade = getGrade(sellQuality)
+
+isGradeAllowed(grade) =>
+    switch minSignalGrade
+        "A+ Only"     => grade == "A+"
+        "A and Above" => grade == "A+" or grade == "A"
+        "B and Above" => grade == "A+" or grade == "A" or grade == "B"
+        => true
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SIGNAL STATE MACHINE (ONE SIGNAL PER TREND PHASE)
+// ─────────────────────────────────────────────────────────────────────────────
+// waitBuy / waitSell reset on each EMA 9/21 crossover, ensuring one signal
+// fires per trend phase. Prevents repeated alerts in the same trend move.
+// See docs/architecture/SIGNAL-CONTRACT.md §5 for full explanation.
+var bool waitBuy  = false
+var bool waitSell = false
+
+bullCross = ta.crossover(ema9,  ema21)
+bearCross = ta.crossunder(ema9, ema21)
+
+if bullCross
+    waitBuy  := true
+    waitSell := false
+if bearCross
+    waitSell := true
+    waitBuy  := false
+
+// Core pre-filter conditions (before score gate)
+rawBuy  = waitBuy  and enableLong  and bullTrend and inZoneBull and 
+          bullCandleOk and msBullOk and htfBull and sessionAllowed and 
+          not isChoppy and not isExtended and barstate.isconfirmed
+
+rawSell = waitSell and enableShort and bearTrend and inZoneBear and 
+          bearCandleOk and msBearOk and htfBear and sessionAllowed and 
+          not isChoppy and not isExtended and barstate.isconfirmed
+
+// Final signals gated by quality score and grade
+buySignal  = rawBuy  and (buyQuality  >= minEntryScore) and isGradeAllowed(buyGrade)
+sellSignal = rawSell and (sellQuality >= minEntryScore) and isGradeAllowed(sellGrade)
+
+// Reset wait flags after signal fires
+if buySignal
+    waitBuy  := false
+if sellSignal
+    waitSell := false
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RISK REFERENCE LEVEL TRACKER
+// ─────────────────────────────────────────────────────────────────────────────
+// ATR-based SL/TP reference prices stored from the signal bar.
+// These are indicative reference guides only. Not executable broker orders.
+var float refEntry = na
+var float refSL    = na
+var float refTP1   = na
+var float refTP2   = na
+var bool  refLong  = true
+
+if buySignal
+    refEntry := close
+    refSL    := close - (atr * slAtrMult)
+    refTP1   := close + (atr * slAtrMult * tp1RrMult)
+    refTP2   := close + (atr * slAtrMult * tp2RrMult)
+    refLong  := true
+
+if sellSignal
+    refEntry := close
+    refSL    := close + (atr * slAtrMult)
+    refTP1   := close - (atr * slAtrMult * tp1RrMult)
+    refTP2   := close - (atr * slAtrMult * tp2RrMult)
+    refLong  := false
+
+// Reset on opposing cross
+if bearCross and refLong
+    refEntry := na
+if bullCross and not refLong
+    refEntry := na
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EMA PLOTS
+// ─────────────────────────────────────────────────────────────────────────────
+plot(showEma9   ? ema9   : na, "EMA 9",   color=colorEma9,   linewidth=2, title="EMA 9")
+plot(showEma21  ? ema21  : na, "EMA 21",  color=colorEma21,  linewidth=2, title="EMA 21")
+plot(showEma200 ? ema200 : na, "EMA 200", color=colorEma200, linewidth=3, title="EMA 200")
+
+// EMA Zone Cloud between 9 and 21
+pZone9  = plot(showEmaCloud ? ema9  : na, display=display.none, title="Zone Upper")
+pZone21 = plot(showEmaCloud ? ema21 : na, display=display.none, title="Zone Lower")
+fill(pZone9, pZone21, 
+     color=ema9 > ema21 ? color.new(color.green, 82) : color.new(color.red, 82), 
+     title="EMA Zone Cloud")
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SIGNAL MARKERS & LABELS
+// ─────────────────────────────────────────────────────────────────────────────
+plotshape(buySignal,  "BUY Signal",  shape.triangleup,   location.belowbar, 
+          colorBuy,  size=size.small, title="BUY Marker")
+plotshape(sellSignal, "SELL Signal", shape.triangledown, location.abovebar, 
+          colorSell, size=size.small, title="SELL Marker")
+
+if buySignal
+    string lbl = "BUY"
+    if showGradeOnLabel
+        lbl := lbl + " " + buyGrade
+    if showScoreOnLabel
+        lbl := lbl + "\n(" + str.tostring(buyQuality, "#") + ")"
+    label.new(n, low, lbl, style=label.style_label_up, 
+              color=color.new(#089981, 0), textcolor=color.white, size=size.small)
+
+if sellSignal
+    string lbl = "SELL"
+    if showGradeOnLabel
+        lbl := lbl + " " + sellGrade
+    if showScoreOnLabel
+        lbl := lbl + "\n(" + str.tostring(sellQuality, "#") + ")"
+    label.new(n, high, lbl, style=label.style_label_down, 
+              color=color.new(#f23645, 0), textcolor=color.white, size=size.small)
+
+// ─── RISK REFERENCE LINES ─────────────────────────────────────────────────────
+// Plot SL / TP reference levels from the most recent signal bar.
+// Displayed as dotted lines. These are NOT orders — they are informational guides.
+plot(showRiskLevels and showRlLevels ? refSL  : na, "SL Reference",  
+     color=color.new(#ff5252, 20), linewidth=1, style=plot.style_linebr, title="SL Ref")
+plot(showRiskLevels and showRlLevels ? refTP1 : na, "TP1 Reference", 
+     color=color.new(#00e676, 30), linewidth=1, style=plot.style_linebr, title="TP1 Ref")
+plot(showRiskLevels and showRlLevels ? refTP2 : na, "TP2 Reference", 
+     color=color.new(#00e676, 60), linewidth=1, style=plot.style_linebr, title="TP2 Ref")
+
+// ─── ACTIVE SIGNAL STATE DOTS ─────────────────────────────────────────────────
+var bool tpBuy  = false
+var bool tpSell = false
+if buySignal  
+    tpBuy  := true,  tpSell := false
+if sellSignal 
+    tpSell := true,  tpBuy  := false
+if bearCross  
+    tpBuy  := false
+if bullCross  
+    tpSell := false
+
+plotshape(tpBuy,  "BUY Active",  shape.circle, location.top,    color.new(colorBuy,  30), size=size.tiny)
+plotshape(tpSell, "SELL Active", shape.circle, location.bottom, color.new(colorSell, 30), size=size.tiny)
+
+// ─── DAILY DIVIDER ─────────────────────────────────────────────────────────────
+day = dayofweek
+if day != day[1] and showDayDiv
+    line.new(n, close + syminfo.mintick, n, close - syminfo.mintick, 
+             color=color.new(color.gray, 60), extend=extend.both, style=line.style_dashed)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DASHBOARD
+// ─────────────────────────────────────────────────────────────────────────────
+var tbl_pos  = dashPos == "Bottom Left" ? position.bottom_left  : 
+               dashPos == "Top Left"    ? position.top_left     :
+               dashPos == "Bottom Right"? position.bottom_right : position.top_right
+var tbl_size = dashSize == "Tiny" ? size.tiny : dashSize == "Normal" ? size.normal : size.small
+
+var int totalRows = showAdvDash ? 9 : 6
+var table tb = table.new(tbl_pos, 4, totalRows, 
+                         bgcolor=#1e222d, border_color=#373a46, border_width=1, 
+                         frame_color=#373a46, frame_width=1)
+
+if barstate.isfirst and showDash
+    table.cell(tb, 0, 0, "HR EMA PULLBACK PRO  v1.0", 
+               bgcolor=#131722, text_color=color.white, text_size=tbl_size)
+    table.merge_cells(tb, 0, 0, 3, 0)
+
+if barstate.islast and showDash
+    // Row 1: Signal state
+    activeSignal = buySignal  ? "BUY ("  + buyGrade  + ")" : 
+                   sellSignal ? "SELL (" + sellGrade + ")" : 
+                   tpBuy      ? "IN BUY" : tpSell ? "IN SELL" : "WATCHING"
+    sigColor     = buySignal or tpBuy   ? #089981 : 
+                   sellSignal or tpSell ? #f23645 : #2a2e39
+    table.cell(tb, 0, 1, "SIGNAL: " + activeSignal, 
+               text_color=color.white, text_size=tbl_size, bgcolor=sigColor)
+    table.merge_cells(tb, 0, 1, 3, 1)
+
+    // Row 2: Trend states
+    trendColor = bullTrend ? #089981 : bearTrend ? #f23645 : #5d606b
+    htfColor   = htfClose > htf200 ? #089981 : htfClose < htf200 ? #f23645 : #5d606b
+    table.cell(tb, 0, 2, "TREND: " + trendText,    
+               text_color=color.white, text_size=tbl_size, bgcolor=trendColor)
+    table.merge_cells(tb, 0, 2, 1, 2)
+    table.cell(tb, 2, 2, "HTF: " + htfStateText,   
+               text_color=color.white, text_size=tbl_size, bgcolor=htfColor)
+    table.merge_cells(tb, 2, 2, 3, 2)
+
+    // Row 3: Market regime
+    regColor = isChoppy ? #f23645 : isExtended ? #ff9800 : #089981
+    table.cell(tb, 0, 3, "MARKET: " + regimeText,  
+               text_color=color.white, text_size=tbl_size, bgcolor=regColor)
+    table.merge_cells(tb, 0, 3, 1, 3)
+    sessColor = sessionAllowed ? #089981 : #5d606b
+    table.cell(tb, 2, 3, "SESSION: " + activeSessionName, 
+               text_color=color.white, text_size=tbl_size, bgcolor=sessColor)
+    table.merge_cells(tb, 2, 3, 3, 3)
+
+    // Row 4: EMA health and quality score
+    activeScore = bullTrend ? buyQuality : sellQuality
+    table.cell(tb, 0, 4, "EMA HEALTH: " + str.tostring(healthScore, "#") + "/100 (" + healthText + ")", 
+               text_color=color.white, text_size=tbl_size)
+    table.merge_cells(tb, 0, 4, 1, 4)
+    table.cell(tb, 2, 4, "QUALITY SCORE: " + str.tostring(activeScore, "#") + "/100", 
+               text_color=color.white, text_size=tbl_size)
+    table.merge_cells(tb, 2, 4, 3, 4)
+
+    if showAdvDash
+        // Row 5: Risk reference
+        if not na(refEntry)
+            rrText = "ENTRY: " + str.tostring(refEntry, format.mintick) + 
+                     "  SL: " + str.tostring(refSL, format.mintick) +
+                     "  TP1: " + str.tostring(refTP1, format.mintick)
+            table.cell(tb, 0, 5, rrText, text_color=color.white, text_size=tbl_size)
+            table.merge_cells(tb, 0, 5, 3, 5)
+
+        // Row 6: Filters active
+        filters = "Filters: " + 
+                  (useHtfFilter ? "HTF " : "") + 
+                  (useChopFilter ? "CHOP " : "") + 
+                  (useExtFilter ? "EXT " : "") + 
+                  (useMsFilter ? "MS " : "") + 
+                  (useSessionFilter ? "SESS" : "")
+        table.cell(tb, 0, 6, filters, text_color=#888888, text_size=tbl_size)
+        table.merge_cells(tb, 0, 6, 3, 6)
+
+        // Row 7: EMA values
+        emaRow = "EMA9: " + str.tostring(ema9, format.mintick) + 
+                 "  EMA21: " + str.tostring(ema21, format.mintick) + 
+                 "  EMA200: " + str.tostring(ema200, format.mintick)
+        table.cell(tb, 0, 7, emaRow, text_color=#888888, text_size=tbl_size)
+        table.merge_cells(tb, 0, 7, 3, 7)
+
+        // Row 8: ATR & Gap
+        metaRow = "ATR: " + str.tostring(atr, format.mintick) + 
+                  "  Gap Ratio: " + str.tostring(gapRatio, "#.##") + 
+                  "  TF: " + timeframe.period
+        table.cell(tb, 0, 8, metaRow, text_color=#888888, text_size=tbl_size)
+        table.merge_cells(tb, 0, 8, 3, 8)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ALERT CONDITIONS
+// ─────────────────────────────────────────────────────────────────────────────
+// TradingView alertcondition() registers conditions you can attach alerts to.
+// Alerts fire on bar close (barstate.isconfirmed is already required in the signal).
+// To set up an alert: right-click chart → Add alert → select condition below.
+alertcondition(buySignal  and alertOnBuy,  
+     title="HR EMA Pullback — BUY Signal",  
+     message="HR EMA Pullback PRO | BUY Signal Confirmed | Check dashboard for details.")
+alertcondition(sellSignal and alertOnSell, 
+     title="HR EMA Pullback — SELL Signal", 
+     message="HR EMA Pullback PRO | SELL Signal Confirmed | Check dashboard for details.")
+alertcondition(buySignal  and buyGrade  == "A+" and alertOnAPlus, 
+     title="HR EMA Pullback — A+ BUY",  
+     message="HR EMA Pullback PRO | A+ BUY Signal Confirmed | Top-grade setup.")
+alertcondition(sellSignal and sellGrade == "A+" and alertOnAPlus, 
+     title="HR EMA Pullback — A+ SELL", 
+     message="HR EMA Pullback PRO | A+ SELL Signal Confirmed | Top-grade setup.")
+
+// Dynamic alert payload (fires once per bar close via built-in alert())
+// Format: SYMBOL | TF | DIRECTION | Grade | Score | Health | Trend | HTF | Session
+// Future v2.0: JSON webhook via research/schema/alert-payload.schema.json
+if buySignal and alertOnBuy
+    string msg = '{"brand":"Hemanth Ranam","system":"TradingView","strategy":"EMA Pullback Pro","signal":"BUY","symbol":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","entry":' + str.tostring(refEntry, "#.##") + ',"stop_loss":' + str.tostring(refSL, "#.##") + ',"take_profit_1":' + str.tostring(refTP1, "#.##") + ',"score":' + str.tostring(buyQuality, "#") + ',"grade":"' + buyGrade + '","timestamp":' + str.tostring(time) + '}'
+    alert(msg, alert.freq_once_per_bar_close)
+
+if sellSignal and alertOnSell
+    string msg = '{"brand":"Hemanth Ranam","system":"TradingView","strategy":"EMA Pullback Pro","signal":"SELL","symbol":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","entry":' + str.tostring(refEntry, "#.##") + ',"stop_loss":' + str.tostring(refSL, "#.##") + ',"take_profit_1":' + str.tostring(refTP1, "#.##") + ',"score":' + str.tostring(sellQuality, "#") + ',"grade":"' + sellGrade + '","timestamp":' + str.tostring(time) + '}'
+    alert(msg, alert.freq_once_per_bar_close)
+
