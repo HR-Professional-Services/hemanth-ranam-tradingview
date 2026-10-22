@@ -413,13 +413,13 @@ if bullCross and not refLong
 // ─────────────────────────────────────────────────────────────────────────────
 // EMA PLOTS
 // ─────────────────────────────────────────────────────────────────────────────
-plot(showEma9   ? ema9   : na, "EMA 9",   color=colorEma9,   linewidth=2, title="EMA 9")
-plot(showEma21  ? ema21  : na, "EMA 21",  color=colorEma21,  linewidth=2, title="EMA 21")
-plot(showEma200 ? ema200 : na, "EMA 200", color=colorEma200, linewidth=3, title="EMA 200")
+plot(showEma9   ? ema9   : na, title="EMA 9",   color=colorEma9,   linewidth=2)
+plot(showEma21  ? ema21  : na, title="EMA 21",  color=colorEma21,  linewidth=2)
+plot(showEma200 ? ema200 : na, title="EMA 200", color=colorEma200, linewidth=3)
 
 // EMA Zone Cloud between 9 and 21
-pZone9  = plot(showEmaCloud ? ema9  : na, display=display.none, title="Zone Upper")
-pZone21 = plot(showEmaCloud ? ema21 : na, display=display.none, title="Zone Lower")
+pZone9  = plot(showEmaCloud ? ema9  : na, title="Zone Upper", display=display.none)
+pZone21 = plot(showEmaCloud ? ema21 : na, title="Zone Lower", display=display.none)
 fill(pZone9, pZone21, 
      color=ema9 > ema21 ? color.new(color.green, 82) : color.new(color.red, 82), 
      title="EMA Zone Cloud")
@@ -427,10 +427,10 @@ fill(pZone9, pZone21,
 // ─────────────────────────────────────────────────────────────────────────────
 // SIGNAL MARKERS & LABELS
 // ─────────────────────────────────────────────────────────────────────────────
-plotshape(buySignal,  "BUY Signal",  shape.triangleup,   location.belowbar, 
-          colorBuy,  size=size.small, title="BUY Marker")
-plotshape(sellSignal, "SELL Signal", shape.triangledown, location.abovebar, 
-          colorSell, size=size.small, title="SELL Marker")
+plotshape(buySignal,  title="BUY Marker",  style=shape.triangleup,   location=location.belowbar, 
+          color=colorBuy,  size=size.small)
+plotshape(sellSignal, title="SELL Marker", style=shape.triangledown, location=location.abovebar, 
+          color=colorSell, size=size.small)
 
 if buySignal
     string lbl = "BUY"
@@ -453,12 +453,12 @@ if sellSignal
 // ─── RISK REFERENCE LINES ─────────────────────────────────────────────────────
 // Plot SL / TP reference levels from the most recent signal bar.
 // Displayed as dotted lines. These are NOT orders — they are informational guides.
-plot(showRiskLevels and showRlLevels ? refSL  : na, "SL Reference",  
-     color=color.new(#ff5252, 20), linewidth=1, style=plot.style_linebr, title="SL Ref")
-plot(showRiskLevels and showRlLevels ? refTP1 : na, "TP1 Reference", 
-     color=color.new(#00e676, 30), linewidth=1, style=plot.style_linebr, title="TP1 Ref")
-plot(showRiskLevels and showRlLevels ? refTP2 : na, "TP2 Reference", 
-     color=color.new(#00e676, 60), linewidth=1, style=plot.style_linebr, title="TP2 Ref")
+plot(showRiskLevels and showRlLevels ? refSL  : na, title="SL Ref",  
+     color=color.new(#ff5252, 20), linewidth=1, style=plot.style_linebr)
+plot(showRiskLevels and showRlLevels ? refTP1 : na, title="TP1 Ref", 
+     color=color.new(#00e676, 30), linewidth=1, style=plot.style_linebr)
+plot(showRiskLevels and showRlLevels ? refTP2 : na, title="TP2 Ref", 
+     color=color.new(#00e676, 60), linewidth=1, style=plot.style_linebr)
 
 // ─── ACTIVE SIGNAL STATE DOTS ─────────────────────────────────────────────────
 var bool tpBuy  = false

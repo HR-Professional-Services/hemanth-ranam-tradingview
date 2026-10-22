@@ -34,5 +34,43 @@ for root, dirs, files in os.walk('src'):
                     elif next_indent == 0:
                         all_issues.append((file, i+2, f'BAD_CONTINUATION_ZERO_INDENT: {next_code.strip()[:60]}'))
 
+            # Check duplicate title arguments in plot, plotshape, plotchar
+            content = ''.join(lines)
+            for m in re.finditer(r'(?:^|[^a-zA-Z0-9_.])(plot|plotshape|plotchar)\s*\(([^;]+?)\)', content):
+                fn = m.group(1)
+                args_str = m.group(2)
+                args = []
+                cur = []
+                depth = 0
+                in_str = False
+                quote_char = ''
+                for c in args_str:
+                    if c in ('"', "'"):
+                        if not in_str:
+                            in_str = True
+                            quote_char = c
+                        elif quote_char == c:
+                            in_str = False
+                    elif c == '(' and not in_str:
+                        depth += 1
+                    elif c == ')' and not in_str:
+                        depth -= 1
+                    elif c == ',' and depth == 0 and not in_str:
+                        args.append(''.join(cur).strip())
+                        cur = []
+                        continue
+                    cur.append(c)
+                if cur:
+                    args.append(''.join(cur).strip())
+                
+                # In plot(): series, title, color, ...
+                # In plotshape(): series, title, style, ...
+                # In plotchar(): series, title, char, ...
+                # If args[1] is a string literal (not starting with param_name=), that is positional title!
+                has_pos_title = len(args) > 1 and not ('=' in args[1].split('?')[0]) and (args[1].startswith('"') or args[1].startswith("'"))
+                has_kw_title = any(re.match(r'^title\s*=', a) for a in args)
+                if has_pos_title and has_kw_title:
+                    all_issues.append((file, 0, f'DUPLICATE_TITLE_PARAM: {fn} has both positional "{args[1]}" and keyword title'))
+
 for issue in all_issues:
     print(f'{issue[0]}:{issue[1]}: {issue[2]}')

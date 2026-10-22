@@ -137,6 +137,45 @@ class TestCommercialProductsSuite(unittest.TestCase):
                 if m:
                     self.assertLessEqual(len(m.group(1)), 10, f"{strat} shorttitle '{m.group(1)}' exceeds 10 chars")
 
+    def test_no_duplicate_title_parameter_in_plots(self):
+        """TradingView CE10072: Two or more arguments are passed to the 'title' parameter."""
+        pattern = re.compile(r'(?:^|[^a-zA-Z0-9_.])(plot|plotshape|plotchar)\s*\(([^;]+?)\)')
+        all_scripts = [os.path.join(self.ind_dir, f) for f in self.commercial_indicators] + \
+                      [os.path.join(self.strat_dir, f) for f in self.commercial_strategies]
+        for script_path in all_scripts:
+            with open(script_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            for m in pattern.finditer(content):
+                fn = m.group(1)
+                args_str = m.group(2)
+                args = []
+                cur = []
+                depth = 0
+                in_str = False
+                quote_char = ''
+                for c in args_str:
+                    if c in ('"', "'"):
+                        if not in_str:
+                            in_str = True
+                            quote_char = c
+                        elif quote_char == c:
+                            in_str = False
+                    elif c == '(' and not in_str:
+                        depth += 1
+                    elif c == ')' and not in_str:
+                        depth -= 1
+                    elif c == ',' and depth == 0 and not in_str:
+                        args.append(''.join(cur).strip())
+                        cur = []
+                        continue
+                    cur.append(c)
+                if cur:
+                    args.append(''.join(cur).strip())
+                has_pos_title = len(args) > 1 and not ('=' in args[1].split('?')[0]) and (args[1].startswith('"') or args[1].startswith("'"))
+                has_kw_title = any(re.match(r'^title\s*=', a) for a in args)
+                self.assertFalse(has_pos_title and has_kw_title,
+                                 f"{os.path.basename(script_path)}: {fn} has duplicate title parameter (positional and keyword): {args_str[:60]}")
+
 if __name__ == "__main__":
     unittest.main()
 
