@@ -62,6 +62,7 @@ hemanth-ranam-tradingview/
 │   ├── PHASE_11_COMPILATION_READINESS.md    # Static audit & manual compiler steps
 │   ├── PHASE_11_FORWARD_TEST_PROTOCOL.md    # Blind forward testing protocol & rules
 │   ├── PHASE_12_FINAL_HANDOVER.md   # Master consolidation & handover report
+│   ├── PHASE_14_NATIVE_VALIDATION_GATE.md # Native compiler checklist & frozen candidate gate
 │   ├── PRODUCT_CATALOG.md     # Detailed product specifications
 │   ├── INSTALLATION_AND_USAGE.md # Step-by-step TradingView setup guide
 │   ├── STRATEGY_REFERENCE.md  # Mathematical formulas and signal rules
