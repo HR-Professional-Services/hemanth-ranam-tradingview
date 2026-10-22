@@ -64,20 +64,18 @@ To prevent AI hallucination, marketing exaggeration, and unverified performance 
 2. **Equity Notional vs. Stop-Loss Monetary Position Sizing**:
    - `strategy.percent_of_equity = 1.0` allocates 1% notional trade value, which does NOT risk 1% of equity at the stop loss. Genuine monetary risk sizing requires dynamic lot derivation (`riskCash / (slDistance * pointValue)`).
 3. **Volume Feed Discrepancies**:
-   - Breakout volume filters on CFDs/Forex rely on broker tick volume, which varies between data providers (e.g., OANDA vs FOREX.com vs Exness).
-
-3. **Volume Feed Discrepancies**:
    - Breakout volume filters on CFDs/Forex rely on broker tick volume, which varies between data providers (e.g., OANDA vs FOREX.com vs FXCM).
 
 ---
 
-## 5. Phase 16 Native Validation & Forward-Test Gate Matrix
+## 5. Phase 16 & 17 Native Validation & Forward-Test Gate Matrix
 
-As established in [`docs/PHASE_16_VALIDATION_GATE.md`](file:///c:/Users/vaibh/.gemini/antigravity-ide/scratch/hemanth-ranam-tradingview/docs/PHASE_16_VALIDATION_GATE.md) and [`docs/PHASE_16_OPERATOR_VALIDATION_CHECKLIST.md`](file:///c:/Users/vaibh/.gemini/antigravity-ide/scratch/hemanth-ranam-tradingview/docs/PHASE_16_OPERATOR_VALIDATION_CHECKLIST.md):
+As established in [`docs/PHASE_16_VALIDATION_GATE.md`](file:///c:/Users/vaibh/.gemini/antigravity-ide/scratch/hemanth-ranam-tradingview/docs/PHASE_16_VALIDATION_GATE.md), [`docs/PHASE_16_OPERATOR_VALIDATION_CHECKLIST.md`](file:///c:/Users/vaibh/.gemini/antigravity-ide/scratch/hemanth-ranam-tradingview/docs/PHASE_16_OPERATOR_VALIDATION_CHECKLIST.md), and audited in [`docs/PHASE_17_OPERATOR_EVIDENCE_REVIEW.md`](file:///c:/Users/vaibh/.gemini/antigravity-ide/scratch/hemanth-ranam-tradingview/docs/PHASE_17_OPERATOR_EVIDENCE_REVIEW.md):
 
 | Gate Taxonomy | Status | Verification Evidence / Condition |
 | :--- | :--- | :--- |
 | **`CANDIDATE-INTEGRITY`** | **`PASS`** | Checksums verified for `HR_Volatility_Breakout_Candidate_ExpA2.pine` (`57adb2...`) and `HR_Market_Structure_Candidate_Forward.pine` (`b32601...`). All 8 commercial baselines match `faee296` (0 byte diff). |
-| **`NATIVE-COMPILATION`** | **`PENDING`** | Automated browser execution blocked (Playwright CDN 404); requires manual operator confirmation in authenticated TradingView session. |
-| **`RISK-SIZING-VALIDATION`** | **`PASS`** *(Algorithm)* / **`PENDING`** *(Chart)* | Unit formula `rawQty = R / (D * PV)` and floor volume step rounding audited in Pine Script v6. Live Strategy Tester trade entry audit pending operator intake. |
+| **`NATIVE-COMPILATION`** | **`PENDING`** | Automated browser execution blocked (Playwright CDN 404); requires manual operator confirmation in authenticated TradingView session. Intake checklist currently unfilled (`PENDING`). |
+| **`RISK-SIZING-VALIDATION`** | **`PASS`** *(Algorithm)* / **`PENDING`** *(Chart)* | Unit formula `rawQty = R / (D * PV)` and floor volume step rounding audited in Pine Script v6. Empirical Strategy Tester trade entry audit pending operator intake. |
 | **`FORWARD-PAPER-TEST`** | **`BLOCKED`** | Forward paper evaluation is gated. Logger activation requires completed operator compilation checklist and explicit operator authorization. |
+
