@@ -124,13 +124,14 @@ is_ldn = math.sign(nz(time(timeframe.period, "0700-1600", tz)))
 is_tyo = math.sign(nz(time(timeframe.period, "0000-0900", tz)))
 is_cus = not na(time(timeframe.period, customSession))
 
-sessionAllowed = not useSessionFilter or switch prefSessions
+sessionMatch = switch prefSessions
     "London Only"         => is_ldn > 0
     "New York Only"       => is_ny  > 0
     "London + NY"         => (is_ldn > 0) or (is_ny > 0)
     "All Active Sessions" => (is_ny > 0) or (is_ldn > 0) or (is_tyo > 0)
     "Off — Custom"        => is_cus
     => true
+sessionAllowed = not useSessionFilter or sessionMatch
 
 sessionName = is_ldn > 0 ? "London" : is_ny > 0 ? "New York" : is_tyo > 0 ? "Tokyo" : "Off-Hours"
 
