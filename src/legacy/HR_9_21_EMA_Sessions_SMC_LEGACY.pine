@@ -1,5 +1,5 @@
 //@version=5
-indicator("Hemanth Ranam — Multi-Strategy Trading Engine", shorttitle="HR Trading Engine", overlay=true, max_labels_count=500, max_lines_count=500)
+indicator("Hemanth Ranam — Multi-Strategy Trading Engine", shorttitle="HR-LEGACY", overlay=true, max_labels_count=500, max_lines_count=500)
 
 // =============================================================================
 // HEMANTH RANAM — INSTITUTIONAL MULTI-STRATEGY TRADING SYSTEM (PINE SCRIPT V5)

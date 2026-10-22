@@ -8,7 +8,7 @@
 // Target Risk  : 0.5% Planned Equity Risk per Trade (Fail-Closed Guardrail)
 // =============================================================================
 strategy("HR Market Structure Momentum Pro [Candidate Forward]", 
-         shorttitle="HR Structure [Forward]", 
+         shorttitle="HR-STR-FWD", 
          overlay=true, 
          initial_capital=10000, 
          default_qty_type=strategy.percent_of_equity, 

@@ -1,6 +1,6 @@
 //@version=6
 strategy("HR EMA Pullback Pro [Strategy]", 
-         shorttitle="HR EMA Pullback Strat", 
+         shorttitle="HR-EMA-S", 
          overlay=true, 
          initial_capital=10000, 
          default_qty_type=strategy.percent_of_equity, 
@@ -161,9 +161,7 @@ distEma9   = math.abs(close - ema9)
 isExtended = useExtFilter and (atr > 0 and (distEma9 / atr) > maxExtAtr)
 
 // Health Score (0-100)
-float slopeScore = ((bullTrend and ema9Slope > 0 and ema21Slope > 0) or 
-                    (bearTrend and ema9Slope < 0 and ema21Slope < 0)) ? 30.0 : 
-                   ((ema9Slope != 0 or ema21Slope != 0) ? 15.0 : 0.0)
+float slopeScore = ((bullTrend and ema9Slope > 0 and ema21Slope > 0) or (bearTrend and ema9Slope < 0 and ema21Slope < 0)) ? 30.0 : ((ema9Slope != 0 or ema21Slope != 0) ? 15.0 : 0.0)
 float stackScore = (bullStack or bearStack) ? 30.0 : ((bullTrend or bearTrend) ? 20.0 : 0.0)
 float gapScore   = gapRatio >= 0.15 ? 25.0 : gapRatio >= 0.08 ? 18.0 : gapRatio >= 0.04 ? 10.0 : 0.0
 float posScore   = ((bullTrend and low > ema200) or (bearTrend and high < ema200)) ? 15.0 : 5.0
@@ -225,15 +223,8 @@ candleBody    = math.abs(close - open)
 bullBodyOk    = close > open and (candleBody / candleRange) >= (minBodyPct / 100.0)
 bearBodyOk    = close < open and (candleBody / candleRange) >= (minBodyPct / 100.0)
 
-bullCandleOk  = (not requireCloseBeyondEma or close > ema9) and
-                (not useEngulfing      or bullEngulfing)     and
-                (not useWickRejection  or bullWickOk)        and
-                (not useStrongBody     or bullBodyOk)
-
-bearCandleOk  = (not requireCloseBeyondEma or close < ema9) and
-                (not useEngulfing      or bearEngulfing)     and
-                (not useWickRejection  or bearWickOk)        and
-                (not useStrongBody     or bearBodyOk)
+bullCandleOk  = (not requireCloseBeyondEma or close > ema9) and (not useEngulfing or bullEngulfing) and (not useWickRejection or bullWickOk) and (not useStrongBody or bullBodyOk)
+bearCandleOk  = (not requireCloseBeyondEma or close < ema9) and (not useEngulfing or bearEngulfing) and (not useWickRejection or bearWickOk) and (not useStrongBody or bearBodyOk)
 
 // Quality Scoring Engine (0-100)
 calcQualityScore(isLong) =>

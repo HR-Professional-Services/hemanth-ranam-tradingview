@@ -1,6 +1,6 @@
 //@version=6
 indicator("HR Liquidity Sweep Reversal Pro [Indicator]", 
-          shorttitle="HR Liquidity Sweep", 
+          shorttitle="HR-SWEEP", 
           overlay=true, 
           max_labels_count=500, 
           max_boxes_count=200, 

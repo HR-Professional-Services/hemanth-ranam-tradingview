@@ -1,10 +1,5 @@
 //@version=6
-indicator("HR EMA Pullback Pro [Indicator]", 
-          shorttitle="HR EMA Pullback",
-          overlay=true,
-          max_labels_count=500,
-          max_boxes_count=200,
-          max_lines_count=200)
+indicator("HR EMA Pullback Pro [Indicator]", shorttitle="HR-EMA", overlay=true, max_labels_count=500, max_boxes_count=200, max_lines_count=200)
 
 // ============================================================================
 // HR EMA PULLBACK PRO — COMMERCIAL INDICATOR  v1.0
@@ -209,8 +204,7 @@ bearTrend = close < ema200 and ema9 < ema21
 strongBull = bullStack and close > ema9 and ema9Slope > 0 and ema21Slope > 0
 strongBear = bearStack and close < ema9 and ema9Slope < 0 and ema21Slope < 0
 
-trendText = strongBull ? "STRONG BULL" : bullTrend ? "BULL" : 
-            strongBear ? "STRONG BEAR" : bearTrend ? "BEAR" : "NEUTRAL"
+trendText = strongBull ? "STRONG BULL" : bullTrend ? "BULL" : strongBear ? "STRONG BEAR" : bearTrend ? "BEAR" : "NEUTRAL"
 
 // ─── EMA GAP & REGIME FILTERS ────────────────────────────────────────────────
 emaGap   = math.abs(ema9 - ema21)
@@ -228,18 +222,13 @@ regimeText = isChoppy ? "CHOPPY" : isExtended ? "EXTENDED" : "TRENDING"
 // ─── EMA HEALTH SCORE (0–100) ────────────────────────────────────────────────
 // Weighted composite of slope quality, stacking, gap, and price position.
 // Used as 25% of the entry quality score.
-float slopeScore = ((bullTrend and ema9Slope > 0 and ema21Slope > 0) or 
-                    (bearTrend and ema9Slope < 0 and ema21Slope < 0)) ? 30.0 : 
-                   ((ema9Slope != 0 or ema21Slope != 0) ? 15.0 : 0.0)
-float stackScore = (bullStack or bearStack) ? 30.0 : 
-                   ((bullTrend or bearTrend) ? 20.0 : 0.0)
-float gapScore   = gapRatio >= 0.15 ? 25.0 : gapRatio >= 0.08 ? 18.0 : 
-                   gapRatio >= 0.04 ? 10.0 : 0.0
+float slopeScore = ((bullTrend and ema9Slope > 0 and ema21Slope > 0) or (bearTrend and ema9Slope < 0 and ema21Slope < 0)) ? 30.0 : ((ema9Slope != 0 or ema21Slope != 0) ? 15.0 : 0.0)
+float stackScore = (bullStack or bearStack) ? 30.0 : ((bullTrend or bearTrend) ? 20.0 : 0.0)
+float gapScore   = gapRatio >= 0.15 ? 25.0 : gapRatio >= 0.08 ? 18.0 : gapRatio >= 0.04 ? 10.0 : 0.0
 float posScore   = ((bullTrend and low > ema200) or (bearTrend and high < ema200)) ? 15.0 : 5.0
 
 healthScore = math.min(100.0, slopeScore + stackScore + gapScore + posScore)
-healthText  = healthScore >= 90 ? "Strong" : healthScore >= 75 ? "Healthy" : 
-              healthScore >= 60 ? "Developing" : healthScore >= 40 ? "Neutral" : "Weak"
+healthText  = healthScore >= 90 ? "Strong" : healthScore >= 75 ? "Healthy" : healthScore >= 60 ? "Developing" : healthScore >= 40 ? "Neutral" : "Weak"
 
 // ─── SESSION ENGINE ───────────────────────────────────────────────────────────
 var string tz = "UTC"
@@ -259,8 +248,7 @@ sessionAllowed = not useSessionFilter or switch prefSessions
     "Off — Use Custom"     => is_cus
     => true
 
-activeSessionName = is_ldn > 0 ? "London" : is_ny > 0 ? "New York" : 
-                    is_tyo > 0 ? "Tokyo" : "Off-Hours"
+activeSessionName = is_ldn > 0 ? "London" : is_ny > 0 ? "New York" : is_tyo > 0 ? "Tokyo" : "Off-Hours"
 
 // ─── MARKET STRUCTURE FILTER ─────────────────────────────────────────────────
 // Note: pivothigh/pivotlow with msPivotLen introduces an msPivotLen-bar lag.

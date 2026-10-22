@@ -1,6 +1,6 @@
 //@version=6
 indicator("HR Market Structure Momentum Pro [Indicator]", 
-          shorttitle="HR Market Structure", 
+          shorttitle="HR-STRUCT", 
           overlay=true, 
           max_labels_count=500, 
           max_boxes_count=200, 

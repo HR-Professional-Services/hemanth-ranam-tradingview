@@ -1,6 +1,6 @@
 //@version=6
 strategy("HR Liquidity Sweep Reversal Pro [Strategy]", 
-         shorttitle="HR Liquidity Sweep Strat", 
+         shorttitle="HR-SWP-S", 
          overlay=true, 
          initial_capital=10000, 
          default_qty_type=strategy.percent_of_equity, 

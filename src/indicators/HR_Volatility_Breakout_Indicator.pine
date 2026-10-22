@@ -1,6 +1,6 @@
 //@version=6
 indicator("HR Volatility Expansion Breakout Pro [Indicator]", 
-          shorttitle="HR Vol Breakout", 
+          shorttitle="HR-VOL", 
           overlay=true, 
           max_labels_count=500, 
           max_boxes_count=200, 

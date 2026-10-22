@@ -122,5 +122,21 @@ class TestCommercialProductsSuite(unittest.TestCase):
         for doc in expected_docs:
             self.assertTrue(os.path.exists(doc), f"Missing documentation manual: {doc}")
 
+    def test_shorttitle_length_limit(self):
+        """TradingView strictly enforces shorttitle <= 10 characters (SHORT_TITLE_TOO_LONG)."""
+        for ind in self.commercial_indicators:
+            with open(os.path.join(self.ind_dir, ind), "r", encoding="utf-8") as f:
+                content = f.read()
+                m = re.search(r'shorttitle\s*=\s*"([^"]+)"', content)
+                if m:
+                    self.assertLessEqual(len(m.group(1)), 10, f"{ind} shorttitle '{m.group(1)}' exceeds 10 chars")
+        for strat in self.commercial_strategies:
+            with open(os.path.join(self.strat_dir, strat), "r", encoding="utf-8") as f:
+                content = f.read()
+                m = re.search(r'shorttitle\s*=\s*"([^"]+)"', content)
+                if m:
+                    self.assertLessEqual(len(m.group(1)), 10, f"{strat} shorttitle '{m.group(1)}' exceeds 10 chars")
+
 if __name__ == "__main__":
     unittest.main()
+

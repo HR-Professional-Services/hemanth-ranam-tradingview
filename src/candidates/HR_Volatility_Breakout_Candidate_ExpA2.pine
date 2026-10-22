@@ -8,7 +8,7 @@
 // Target Risk  : 0.5% Planned Equity Risk per Trade (Fail-Closed Guardrail)
 // =============================================================================
 strategy("HR Volatility Breakout Pro [Candidate Exp A2]", 
-         shorttitle="HR Vol Breakout [Exp A2]", 
+         shorttitle="HR-VOL-A2", 
          overlay=true, 
          initial_capital=10000, 
          default_qty_type=strategy.percent_of_equity, 

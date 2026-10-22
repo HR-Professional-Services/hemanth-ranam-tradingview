@@ -1,6 +1,6 @@
 //@version=6
 strategy("HR Volatility Expansion Breakout Pro [Strategy]", 
-         shorttitle="HR Vol Breakout Strat", 
+         shorttitle="HR-VOL-S", 
          overlay=true, 
          initial_capital=10000, 
          default_qty_type=strategy.percent_of_equity, 
