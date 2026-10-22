@@ -21,34 +21,38 @@ To prevent AI hallucination, marketing exaggeration, and unverified performance 
 
 ## 2. Product Verification Status Ledger
 
-| Product ID | Product Name | Script Path | Script Type | Local Python Tests | Native TV Compilation | Strategy Backtest | MT5 Parity Audit | Current Stage |
+| Product ID | Product Name | Script Path | Script Type | Local Python Tests | Native TV Compilation | Local Backtest Status | Forward Validation Status | Release Status |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **HR-PRD-01** | EMA Trend Pullback Pro | `src/indicators/HR_EMA_Pullback_Indicator.pine` | Indicator | **PASSED** (14 checks) | `NATIVE-COMPILATION-PENDING` | N/A | `PARTIAL` | Ready for Native TV Test |
-| **HR-PRD-01** | EMA Trend Pullback Pro | `src/strategies/HR_EMA_Pullback_Pro.pine` | Strategy | **PASSED** (14 checks) | `NATIVE-COMPILATION-PENDING` | `BACKTEST-PENDING` | `PARTIAL` | Ready for Native TV Test |
-| **HR-PRD-02** | Liquidity Sweep Reversal Pro | `src/indicators/HR_Liquidity_Sweep_Indicator.pine` | Indicator | **PASSED** (14 checks) | `NATIVE-COMPILATION-PENDING` | N/A | `PARTIAL` | Ready for Native TV Test |
-| **HR-PRD-02** | Liquidity Sweep Reversal Pro | `src/strategies/HR_Liquidity_Sweep_Strategy.pine` | Strategy | **PASSED** (14 checks) | `NATIVE-COMPILATION-PENDING` | `BACKTEST-PENDING` | `PARTIAL` | Ready for Native TV Test |
-| **HR-PRD-03** | Volatility Expansion Breakout | `src/indicators/HR_Volatility_Breakout_Indicator.pine` | Indicator | **PASSED** (14 checks) | `NATIVE-COMPILATION-PENDING` | N/A | `PARTIAL` | Ready for Native TV Test |
-| **HR-PRD-03** | Volatility Expansion Breakout | `src/strategies/HR_Volatility_Breakout_Strategy.pine` | Strategy | **PASSED** (14 checks) | `NATIVE-COMPILATION-PENDING` | `BACKTEST-PENDING` | `PARTIAL` | Ready for Native TV Test |
-| **HR-PRD-04** | Market Structure Momentum | `src/indicators/HR_Market_Structure_Indicator.pine` | Indicator | **PASSED** (14 checks) | `NATIVE-COMPILATION-PENDING` | N/A | `PARTIAL` | Ready for Native TV Test |
-| **HR-PRD-04** | Market Structure Momentum | `src/strategies/HR_Market_Structure_Strategy.pine` | Strategy | **PASSED** (14 checks) | `NATIVE-COMPILATION-PENDING` | `BACKTEST-PENDING` | `PARTIAL` | Ready for Native TV Test |
-| **HR-PRD-05** | Adaptive Market Regime Pro | `src/indicators/HR_Adaptive_Regime_Indicator.pine` | Research | N/A | N/A | N/A | `UNVERIFIED` | `DEFERRED-RESEARCH-CANDIDATE` |
+| **HR-PRD-01** | EMA Trend Pullback Pro | `src/indicators/HR_EMA_Pullback_Indicator.pine` | Indicator | **PASSED** (14 checks) | `NATIVE-COMPILATION-PENDING` | N/A | N/A | `REQUIRES-REWORK` |
+| **HR-PRD-01** | EMA Trend Pullback Pro | `src/strategies/HR_EMA_Pullback_Pro.pine` | Strategy | **PASSED** (14 checks) | `NATIVE-COMPILATION-PENDING` | Full Sample PF 0.74 (Losses -$1,411) | N/A | `REQUIRES-REWORK` (Chop Whipsaws) |
+| **HR-PRD-02** | Liquidity Sweep Reversal Pro | `src/indicators/HR_Liquidity_Sweep_Indicator.pine` | Indicator | **PASSED** (14 checks) | `NATIVE-COMPILATION-PENDING` | N/A | N/A | `REQUIRES-REWORK` |
+| **HR-PRD-02** | Liquidity Sweep Reversal Pro | `src/strategies/HR_Liquidity_Sweep_Strategy.pine` | Strategy | **PASSED** (14 checks) | `NATIVE-COMPILATION-PENDING` | Full Sample PF 0.65 (Losses -$2,374) | N/A | `REQUIRES-REWORK` (Trend Whipsaws) |
+| **HR-PRD-03** | Volatility Expansion Breakout | `src/indicators/HR_Volatility_Breakout_Indicator.pine` | Indicator | **PASSED** (14 checks) | `NATIVE-COMPILATION-PENDING` | N/A | N/A | `REQUIRES-REWORK` |
+| **HR-PRD-03** | Volatility Expansion Breakout | `src/strategies/HR_Volatility_Breakout_Strategy.pine` | Strategy | **PASSED** (14 checks) | `NATIVE-COMPILATION-PENDING` | Baseline PF 1.14 (N=9 trades) | N/A | `REQUIRES-REWORK` (Signal Starvation) |
+| **HR-PRD-03** | Volatility Breakout [Exp A2] | `src/candidates/HR_Volatility_Breakout_Candidate_ExpA2.pine` | Research | **PASSED** (All Suite Checks) | `NATIVE-COMPILATION-PENDING` | Full PF 1.53 (N=59), OOS PF 2.22 (N=18) | `FORWARD-PROTOCOL-READY` (0.5% Risk) | `CANDIDATE-REMAINS-RESEARCH-ONLY` |
+| **HR-PRD-04** | Market Structure Momentum | `src/indicators/HR_Market_Structure_Indicator.pine` | Indicator | **PASSED** (14 checks) | `NATIVE-COMPILATION-PENDING` | N/A | N/A | `REQUIRES-REWORK` |
+| **HR-PRD-04** | Market Structure Momentum | `src/strategies/HR_Market_Structure_Strategy.pine` | Strategy | **PASSED** (Local Regressions) | `NATIVE-COMPILATION-BLOCKED` (Line 163) | In-Sample PF 0.88, OOS PF 1.33 | Blocked (Requires Candidate) | `REQUIRES-REWORK` |
+| **HR-PRD-04** | Market Structure [Forward] | `src/candidates/HR_Market_Structure_Candidate_Forward.pine` | Research | **PASSED** (All Suite Checks) | `NATIVE-COMPILATION-PENDING` | Line 163 Fixed, Dynamic 0.5% Risk | `FORWARD-PROTOCOL-READY` (0.5% Risk) | `CANDIDATE-REMAINS-RESEARCH-ONLY` |
 
 ---
 
 ## 3. Automated Test Execution Record
 
 - **Test Runner**: Python 3.12 `unittest`
-- **Execution Command**: `python -m unittest discover tests`
-- **Date Executed**: 2026-10-22 16:41:06
+- **Execution Command**: `python -m unittest discover tests; python -m unittest discover research/backtest/tests`
+- **Date Executed**: 2026-10-22
 - **Test Modules Run**:
-  1. `tests/test_commercial_products.py`: Verifies existence of all 8 files, `@version=6` declaration, `lookahead = barmerge.lookahead_off`, historical `[1]` indexing on `request.security`, JSON alert payload construction, and max 1% equity risk settings.
+  1. `tests/test_commercial_products.py`: Verifies existence of all 8 commercial files, `@version=6` declaration, `lookahead = barmerge.lookahead_off`, historical `[1]` indexing on `request.security`, JSON alert payload construction, and max 1% equity risk settings.
   2. `tests/test_pine_syntax.py`: Verifies balanced syntax, absence of illegal identifiers, and required imports.
   3. `tests/test_strategies_v6.py`: Verifies compliance of strategy parameters and backtest friction configuration.
+  4. `research/backtest/tests/test_backtest_harness.py`: Deterministic tests verifying EMA math, non-repainting pivot confirmation lag (3 bars), next-bar execution, and monetary risk calculations.
+  5. `research/backtest/tests/test_phase9_risk_and_candidates.py`: Verifies ADX range boundaries, fixed monetary risk position sizing derivation, and zero-SL defensive fallbacks.
+  6. `research/backtest/tests/test_phase10_audit.py`: Reconciles Phase 9 figures, bootstrap profit factor bounds, consecutive loss tracking, and adverse cost stress degradation.
+  7. `research/backtest/tests/test_phase11_forward_protocol.py`: Verifies alert payload schema validation, duplicate alert rejection (idempotency via unique signal_id), directional SL alignment, risk budget hard caps, and frozen configuration integrity.
 - **Results**:
-  - **Tests Run**: 55
+  - **Tests Run**: 71 (55 main regression + 16 research test cases)
   - **Failures**: 0
   - **Errors**: 0
-  - **Execution Time**: 0.195s
   - **Status**: **PASSED (100%)**
 
 ---
@@ -57,7 +61,10 @@ To prevent AI hallucination, marketing exaggeration, and unverified performance 
 
 1. **Intraday Bar Filling vs. Tick Execution**:
    - TradingView strategies execute using `process_orders_on_close = true`, filling market orders at the open of the following bar. MT5 EAs evaluate tick-by-tick and may execute immediately during high volatility.
-2. **Equity-Based vs. Monetary Position Sizing**:
-   - `strategy.percent_of_equity` allocates order volume equal to 1% of account equity. In instruments with wide stops, actual monetary risk at the stop may differ from 1% of cash equity unless dynamically normalized by point value and lot size.
+2. **Equity Notional vs. Stop-Loss Monetary Position Sizing**:
+   - `strategy.percent_of_equity = 1.0` allocates 1% notional trade value, which does NOT risk 1% of equity at the stop loss. Genuine monetary risk sizing requires dynamic lot derivation (`riskCash / (slDistance * pointValue)`).
+3. **Volume Feed Discrepancies**:
+   - Breakout volume filters on CFDs/Forex rely on broker tick volume, which varies between data providers (e.g., OANDA vs FOREX.com vs Exness).
+
 3. **Volume Feed Discrepancies**:
    - Breakout volume filters on CFDs/Forex rely on broker tick volume, which varies between data providers (e.g., OANDA vs FOREX.com vs FXCM).

@@ -1,0 +1,89 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TradingView Forward Paper Trading Alert Payload Schema",
+  "description": "Standardized JSON alert payload schema emitted by Pine Script v6 strategies for non-executing forward paper trade logging.",
+  "type": "object",
+  "properties": {
+    "brand": {
+      "type": "string",
+      "enum": ["Hemanth Ranam"]
+    },
+    "candidate_id": {
+      "type": "string",
+      "pattern": "^HR-PRD-(03-CANDIDATE-EXPA2|04-CANDIDATE-FORWARD)$"
+    },
+    "signal_id": {
+      "type": "string",
+      "minLength": 10
+    },
+    "symbol": {
+      "type": "string",
+      "enum": ["XAUUSD", "GOLD", "XAGUSD", "US500", "SPX500", "USTEC", "NAS100"]
+    },
+    "timeframe": {
+      "type": "string",
+      "enum": ["15", "60", "240", "D"]
+    },
+    "bar_time": {
+      "type": "integer",
+      "description": "Epoch timestamp in milliseconds of bar open / close"
+    },
+    "direction": {
+      "type": "string",
+      "enum": ["BUY", "SELL"]
+    },
+    "entry_price": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "stop_loss": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "take_profit": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "planned_risk_pct": {
+      "type": "number",
+      "minimum": 0.1,
+      "maximum": 1.0
+    },
+    "planned_risk_usd": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "qty": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "exit_reason_planned": {
+      "type": "string"
+    },
+    "score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "grade": {
+      "type": "string",
+      "enum": ["A+", "A", "B", "C"]
+    }
+  },
+  "required": [
+    "brand",
+    "candidate_id",
+    "signal_id",
+    "symbol",
+    "timeframe",
+    "bar_time",
+    "direction",
+    "entry_price",
+    "stop_loss",
+    "take_profit",
+    "planned_risk_pct",
+    "planned_risk_usd",
+    "qty"
+  ],
+  "additionalProperties": false
+}

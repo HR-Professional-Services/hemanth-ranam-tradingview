@@ -47,23 +47,29 @@ hemanth-ranam-tradingview/
 ├── AGENTS.md                  # Permanent agent instructions & anti-hallucination rules
 ├── README.md                  # Main repository overview and guide
 │
-├── src/                       # Production Pine Script v6 source files
-│   ├── indicators/            # 4 Standalone Commercial Indicators
-│   ├── strategies/            # 4 Standalone Commercial Strategies
+├── src/                       # Production & Candidate Pine Script v6 files
+│   ├── indicators/            # 4 Standalone Commercial Indicators (Commit faee296)
+│   ├── strategies/            # 4 Standalone Commercial Strategies (Commit faee296)
+│   ├── candidates/            # Isolated Research Candidates (0.5% Dynamic Risk Sizing)
+│   │   ├── HR_Volatility_Breakout_Candidate_ExpA2.pine
+│   │   └── HR_Market_Structure_Candidate_Forward.pine
 │   └── legacy/                # Preserved historical scripts and prototypes (Read-Only)
 │
-├── docs/                      # Canonical technical documentation
+├── docs/                      # Canonical technical & research documentation
+│   ├── PHASE_8_AUDIT_REPORT.md      # Local backtest baseline report (4 products)
+│   ├── PHASE_9_DEVELOPMENT_REPORT.md# Remediation experiments & Exp A2 derivation
+│   ├── PHASE_10_INDEPENDENT_AUDIT_REPORT.md # Independent verification & PF reconciliation
+│   ├── PHASE_11_COMPILATION_READINESS.md    # Static audit & manual compiler steps
+│   ├── PHASE_11_FORWARD_TEST_PROTOCOL.md    # Blind forward testing protocol & rules
+│   ├── PHASE_12_FINAL_HANDOVER.md   # Master consolidation & handover report
 │   ├── PRODUCT_CATALOG.md     # Detailed product specifications
 │   ├── INSTALLATION_AND_USAGE.md # Step-by-step TradingView setup guide
 │   ├── STRATEGY_REFERENCE.md  # Mathematical formulas and signal rules
 │   ├── ALERTS_AND_INTEGRATION.md # Standardized JSON webhook schemas
-│   ├── ARCHITECTURE.md        # Code separation and layout standards
-│   ├── VERIFICATION_STATUS.md # Evidence ledger and verification status
+│   ├── VERIFICATION_STATUS.md # Master evidence ledger and verification status
 │   ├── MT5_PARITY_MATRIX.md   # MQL5 vs Pine Script parity breakdown
 │   ├── BACKTEST_PROTOCOL.md   # Empirical backtest methodology & split-testing
-│   ├── RELEASE_CHECKLIST.md   # 5-gate commercial release criteria
-│   ├── indicators/            # Individual indicator user manuals
-│   └── strategies/            # Individual strategy user manuals
+│   └── RELEASE_CHECKLIST.md   # 5-gate commercial release criteria
 │
 ├── tests/                     # Automated Python testing and validation engine
 │   ├── test_commercial_products.py # Structural syntax, v6 declaration, security checks
@@ -71,6 +77,10 @@ hemanth-ranam-tradingview/
 │   └── test_strategies_v6.py  # Pine Script v6 compliance verification
 │
 ├── research/                  # Quantitative research, datasets, and configurations
+│   ├── backtest/              # Modular Python backtesting engine & research tests
+│   ├── experiments/           # Reproducible experiment runners (Phase 9/10)
+│   ├── forward_test/          # Passive forward paper-trading logger & JSON schema
+│   └── results/               # Baseline/experiment matrices & trade logs
 └── recovered/                 # Recovered prototypes and historical snapshots (Preserved)
 ```
 
@@ -78,14 +88,17 @@ hemanth-ranam-tradingview/
 
 ## 5. Quick Start: Local Testing
 
-To run the automated validation test suite:
+To run the full automated validation test suite (71 deterministic tests):
 
 ```bash
-# Ensure Python 3.10+ is installed
+# Run Core Commercial Regression Suite (55 tests)
 python -m unittest discover tests
+
+# Run Research Backtest & Protocol Suite (16 tests)
+python -m unittest discover research/backtest/tests
 ```
 
-Current test baseline: **55 tests passed (100% pass rate, 0 failures, 0 errors)**.
+Current test baseline: **71 tests passed (100% pass rate, 0 failures, 0 errors)**.
 
 ---
 
@@ -99,45 +112,46 @@ Current test baseline: **55 tests passed (100% pass rate, 0 failures, 0 errors)*
 5. Configure visual styles, EMA periods, and dashboard displays in the settings menu.
 
 ### Running a Strategy Backtest:
-1. Open **Pine Editor** and paste the contents of any script from `src/strategies/`.
+1. Open **Pine Editor** and paste the contents of any script from `src/strategies/` or `src/candidates/`.
 2. Click **Add to chart**.
 3. Open the **Strategy Tester** tab.
 4. Verify properties: Initial capital `$10,000`, Commission `0.02%`, Slippage `2 ticks`, Order fill `On Bar Close`.
-5. For full protocol details, see [`docs/BACKTEST_PROTOCOL.md`](docs/BACKTEST_PROTOCOL.md) and [`docs/INSTALLATION_AND_USAGE.md`](docs/INSTALLATION_AND_USAGE.md).
+5. For full protocol details, see [`docs/BACKTEST_PROTOCOL.md`](docs/BACKTEST_PROTOCOL.md) and [`docs/PHASE_11_COMPILATION_READINESS.md`](docs/PHASE_11_COMPILATION_READINESS.md).
 
 ---
 
 ## 7. Webhook & JSON Alert Integration
 
-All scripts emit structured JSON alerts compatible with external trade automation gateways:
+All scripts emit structured JSON alerts compatible with external trade automation gateways and the Phase 11 passive paper-trading logger:
 
 ```json
 {
-  "brand": "HR TradingView",
-  "strategy": "HR_EMA_Pullback_Pro",
-  "product_id": "HR-PRD-01",
-  "signal": "BUY",
+  "brand": "Hemanth Ranam",
+  "candidate_id": "HR-PRD-03-CANDIDATE-EXPA2",
+  "signal_id": "HR-PRD-03-XAUUSD-1730000000000-BUY",
   "symbol": "XAUUSD",
   "timeframe": "15",
-  "entry": 2742.10,
-  "stop_loss": 2734.60,
-  "take_profit_1": 2753.35,
-  "risk_r": 1.5,
-  "score": 90,
-  "grade": "A+",
-  "timestamp": 1729614900000
+  "bar_time": 1730000000000,
+  "direction": "BUY",
+  "entry_price": 2720.50,
+  "stop_loss": 2710.50,
+  "take_profit": 2745.50,
+  "planned_risk_pct": 0.5,
+  "planned_risk_usd": 50.0,
+  "qty": 5.0,
+  "exit_reason_planned": "R_MULTIPLE_2.5"
 }
 ```
-Detailed payload definitions and webhook setup instructions are documented in [`docs/ALERTS_AND_INTEGRATION.md`](docs/ALERTS_AND_INTEGRATION.md).
+Detailed payload definitions and forward logging schemas are documented in [`docs/PHASE_11_FORWARD_TEST_PROTOCOL.md`](docs/PHASE_11_FORWARD_TEST_PROTOCOL.md) and [`research/forward_test/forward_test_schema.json`](research/forward_test/forward_test_schema.json).
 
 ---
 
 ## 8. Current Verification & Quality Gate Status
 
-All scripts and strategies operate under strict evidence-based status labels:
-- **Python Static Validation**: `LOCAL-VALIDATION-PASSED` (55/55 tests passed).
+All scripts and strategies operate under strict, evidence-based status labels:
+- **Python Static Validation**: `LOCAL-VALIDATION-PASSED` (71/71 tests passed).
 - **Native TradingView Compilation**: `NATIVE-COMPILATION-PENDING` (manual verification in Pine Editor required).
-- **Strategy Tester Backtesting**: `BACKTEST-PENDING` (empirical trade exports required before commercial claims).
-- **MT5 Source Parity**: `PARTIAL` (structural comparison documented in [`docs/MT5_PARITY_MATRIX.md`](docs/MT5_PARITY_MATRIX.md)).
+- **Forward Paper Testing**: `FORWARD-PROTOCOL-READY` (configurations frozen; evaluation starts post-compilation).
+- **Commercial Release Gate**: `ZERO-COMMERCIAL-RELEASES` (Candidates remain research-only; HR-PRD-01 and HR-PRD-02 require structural rework).
 
-See [`docs/VERIFICATION_STATUS.md`](docs/VERIFICATION_STATUS.md) and [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md) for full release gate tracking.
+See [`docs/VERIFICATION_STATUS.md`](docs/VERIFICATION_STATUS.md) and [`docs/PHASE_12_FINAL_HANDOVER.md`](docs/PHASE_12_FINAL_HANDOVER.md) for full audit tracking.

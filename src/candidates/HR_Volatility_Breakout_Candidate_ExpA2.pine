@@ -1,0 +1,152 @@
+//@version=6
+// =============================================================================
+// EXPERIMENTAL RESEARCH CANDIDATE — NOT FOR LIVE PRODUCTION USE
+// Candidate ID : HR-PRD-03-CANDIDATE-EXPA2
+// Strategy Name: HR Volatility Breakout Pro [Candidate Exp A2 — Forward Paper Testing]
+// Base File    : src/strategies/HR_Volatility_Breakout_Strategy.pine
+// Status       : STATIC-AUDIT-PASSED | NATIVE-COMPILATION-PENDING | RESEARCH-ONLY
+// Target Risk  : 0.5% Planned Equity Risk per Trade (Fail-Closed Guardrail)
+// =============================================================================
+strategy("HR Volatility Breakout Pro [Candidate Exp A2]", 
+         shorttitle="HR Vol Breakout [Exp A2]", 
+         overlay=true, 
+         initial_capital=10000, 
+         default_qty_type=strategy.percent_of_equity, 
+         default_qty_value=0.5, 
+         commission_type=strategy.commission.percent, 
+         commission_value=0.02, 
+         slippage=2, 
+         process_orders_on_close=true, 
+         max_labels_count=500, 
+         max_lines_count=500)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INPUTS
+// ─────────────────────────────────────────────────────────────────────────────
+var string GRP_GEN    = "● General Execution"
+var string GRP_BOX    = "● Squeeze & Consolidation Box"
+var string GRP_RISK   = "● Institutional Risk Sizing & Exits"
+var string GRP_ALERT  = "● Forward Paper-Trading Telemetry"
+
+enableLong         = input.bool(true,  "Enable Long Breakouts",  group=GRP_GEN)
+enableShort        = input.bool(true,  "Enable Short Breakouts", group=GRP_GEN)
+
+// Controlled Squeeze Relaxation (Exp A2: 2.2 ATR Squeeze, 20 Lookback)
+boxLookback        = input.int(20,     "Consolidation Lookback", minval=5, group=GRP_BOX,
+     tooltip="Lookback period to determine high/low consolidation boundaries.")
+squeezeThreshold   = input.float(2.20, "Squeeze Threshold (× ATR)", minval=1.0, maxval=4.0, step=0.1, group=GRP_BOX,
+     tooltip="Candidate Exp A2 relaxes squeeze threshold from 1.80 to 2.20 ATR to resolve signal starvation.")
+requireVolume      = input.bool(true,  "Require Volume Surge", group=GRP_BOX)
+minVolumeMult      = input.float(1.10, "Min Volume Multiplier", minval=1.0, step=0.05, group=GRP_BOX)
+
+// Institutional Risk Model (Phase 11 Research Target: 0.5% Planned Risk)
+useMonetarySizing  = input.bool(true,  "Use Stop-Distance Risk Sizing", group=GRP_RISK,
+     tooltip="When true, sizes contracts dynamically based on planned dollar risk at the stop loss.")
+riskPercent        = input.float(0.5,  "Risk Budget (% of Equity)", minval=0.1, maxval=2.0, step=0.1, group=GRP_RISK,
+     tooltip="Standard research risk budget set to 0.5% of account equity.")
+rrMultiplier       = input.float(2.5,  "Take-Profit R-Multiple", minval=1.0, step=0.1, group=GRP_RISK)
+slBufferAtr        = input.float(0.20, "Stop Loss ATR Buffer", minval=0.0, step=0.05, group=GRP_RISK)
+cooldownBars       = input.int(5,      "Cooldown Bars", minval=1, group=GRP_RISK)
+contractMult       = input.float(1.0,  "Contract Multiplier / Point Value Override", minval=0.001, group=GRP_RISK,
+     tooltip="Contract size multiplier: 1.0 for Gold CFD (1 oz units), 100.0 for 100 oz Gold futures, 1.0 for US500 index CFD.")
+minVolumeStep      = input.float(0.01, "Minimum Volume Step", minval=0.0001, group=GRP_RISK,
+     tooltip="Minimum contract quantity increment enforced by broker / platform.")
+maxRiskUsdCap      = input.float(100.0,"Max Risk Cap ($)", minval=10.0, group=GRP_RISK)
+
+// Telemetry & Paper Trading
+enableAlerts       = input.bool(true,  "Emit Structured JSON Alerts", group=GRP_ALERT)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CALCULATIONS
+// ─────────────────────────────────────────────────────────────────────────────
+atr = ta.atr(14)
+boxHigh = ta.highest(high[1], boxLookback)
+boxLow  = ta.lowest(low[1],   boxLookback)
+boxRange = boxHigh - boxLow
+boxMid   = (boxHigh + boxLow) / 2.0
+
+isCompressed   = (boxRange / atr) <= squeezeThreshold
+avgVolume      = ta.sma(volume, boxLookback)
+volumeExpanded = not requireVolume or na(volume) or (volume >= avgVolume * minVolumeMult)
+
+// Anti-Repainting HTF 200 EMA Filter (Strict [1] bar indexing & lookahead_off)
+htfEma200 = request.security(syminfo.tickerid, "60", ta.ema(close, 200)[1], barmerge.gaps_off, barmerge.lookahead_off)
+htfBullOk = close > htfEma200
+htfBearOk = close < htfEma200
+
+var int lastTradeBar = -100
+canTrade = (bar_index - lastTradeBar) >= cooldownBars
+
+bullBreakout = enableLong  and (close > boxHigh) and (close > open) and isCompressed and volumeExpanded and htfBullOk and barstate.isconfirmed and canTrade
+bearBreakout = enableShort and (close < boxLow)  and (close < open) and isCompressed and volumeExpanded and htfBearOk and barstate.isconfirmed and canTrade
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POSITION SIZING ENGINE (FAIL-CLOSED GUARDRAIL)
+// ─────────────────────────────────────────────────────────────────────────────
+calcSizing(float entryP, float slP) =>
+    slDist = math.abs(entryP - slP)
+    float validQty = 0.0
+    float plannedRiskUsd = 0.0
+    
+    if slDist > 0 and not na(slDist)
+        // Dollar budget capped at maxRiskUsdCap
+        budgetUsd = math.min(strategy.equity * (riskPercent / 100.0), maxRiskUsdCap)
+        plannedRiskUsd := budgetUsd
+        
+        // Determine point value
+        pv = syminfo.pointvalue > 0 ? syminfo.pointvalue : contractMult
+        rawQty = budgetUsd / (slDist * pv)
+        
+        // Round down to volume step to guarantee never exceeding risk budget
+        steppedQty = math.floor(rawQty / minVolumeStep) * minVolumeStep
+        
+        // Fail-closed: reject if below minimum step or invalid
+        if steppedQty >= minVolumeStep
+            validQty := steppedQty
+            
+    [validQty, plannedRiskUsd]
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ORDER EXECUTION & FORWARD TELEMETRY
+// ─────────────────────────────────────────────────────────────────────────────
+if bullBreakout and strategy.position_size == 0
+    entryPrice = close
+    slPrice = boxMid - (atr * slBufferAtr)
+    slDistance = entryPrice - slPrice
+    
+    if slDistance > 0
+        [orderQty, plannedRisk] = calcSizing(entryPrice, slPrice)
+        
+        // Enforce fail-closed risk guardrail: order placed only if qty > 0
+        if orderQty > 0
+            tpPrice = entryPrice + (slDistance * rrMultiplier)
+            lastTradeBar := bar_index
+            
+            strategy.entry("HR_Long_ExpA2", strategy.long, qty=orderQty)
+            strategy.exit("Exit_Long_ExpA2", "HR_Long_ExpA2", stop=slPrice, limit=tpPrice)
+            
+            if enableAlerts
+                sigId = "HR-PRD-03-" + syminfo.ticker + "-" + str.tostring(time) + "-BUY"
+                alertPayload = '{"brand":"Hemanth Ranam","candidate_id":"HR-PRD-03-CANDIDATE-EXPA2","signal_id":"' + sigId + '","symbol":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","bar_time":' + str.tostring(time) + ',"direction":"BUY","entry_price":' + str.tostring(entryPrice, "#.##") + ',"stop_loss":' + str.tostring(slPrice, "#.##") + ',"take_profit":' + str.tostring(tpPrice, "#.##") + ',"planned_risk_pct":' + str.tostring(riskPercent, "#.#") + ',"planned_risk_usd":' + str.tostring(plannedRisk, "#.##") + ',"qty":' + str.tostring(orderQty, "#.####") + ',"exit_reason_planned":"R_MULTIPLE_2.5"}'
+                alert(alertPayload, alert.freq_once_per_bar_close)
+
+if bearBreakout and strategy.position_size == 0
+    entryPrice = close
+    slPrice = boxMid + (atr * slBufferAtr)
+    slDistance = slPrice - entryPrice
+    
+    if slDistance > 0
+        [orderQty, plannedRisk] = calcSizing(entryPrice, slPrice)
+        
+        // Enforce fail-closed risk guardrail: order placed only if qty > 0
+        if orderQty > 0
+            tpPrice = entryPrice - (slDistance * rrMultiplier)
+            lastTradeBar := bar_index
+            
+            strategy.entry("HR_Short_ExpA2", strategy.short, qty=orderQty)
+            strategy.exit("Exit_Short_ExpA2", "HR_Short_ExpA2", stop=slPrice, limit=tpPrice)
+            
+            if enableAlerts
+                sigId = "HR-PRD-03-" + syminfo.ticker + "-" + str.tostring(time) + "-SELL"
+                alertPayload = '{"brand":"Hemanth Ranam","candidate_id":"HR-PRD-03-CANDIDATE-EXPA2","signal_id":"' + sigId + '","symbol":"' + syminfo.ticker + '","timeframe":"' + timeframe.period + '","bar_time":' + str.tostring(time) + ',"direction":"SELL","entry_price":' + str.tostring(entryPrice, "#.##") + ',"stop_loss":' + str.tostring(slPrice, "#.##") + ',"take_profit":' + str.tostring(tpPrice, "#.##") + ',"planned_risk_pct":' + str.tostring(riskPercent, "#.#") + ',"planned_risk_usd":' + str.tostring(plannedRisk, "#.##") + ',"qty":' + str.tostring(orderQty, "#.####") + ',"exit_reason_planned":"R_MULTIPLE_2.5"}'
+                alert(alertPayload, alert.freq_once_per_bar_close)

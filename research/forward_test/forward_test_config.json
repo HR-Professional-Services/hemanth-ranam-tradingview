@@ -1,0 +1,97 @@
+{
+  "protocol_version": "1.0.0",
+  "phase": "Phase 11 — Blind Forward Paper-Trading Protocol",
+  "lead_engineer": "Hemanth Ranam",
+  "execution_engine": "Antigravity Research Engine",
+  "created_at_utc": "2026-10-22T18:00:00Z",
+  "forward_test_start_date_utc": "2026-10-23T00:00:00Z",
+  "account_currency": "USD",
+  "simulated_initial_capital": 10000.0,
+  "governance_rules": {
+    "planned_risk_pct_target": 0.5,
+    "max_planned_risk_pct_hard_cap": 0.75,
+    "max_risk_usd_cap": 100.0,
+    "strict_no_retuning_rule": true,
+    "fail_closed_on_invalid_sizing": true,
+    "prevent_duplicate_signals": true,
+    "prohibit_cross_instrument_pooling": true,
+    "prohibit_live_broker_execution": true
+  },
+  "review_milestones": {
+    "min_forward_trades_per_candidate": 50,
+    "min_forward_calendar_days": 60,
+    "early_stop_consecutive_losses": 12,
+    "early_stop_max_drawdown_pct": 10.0
+  },
+  "candidates": [
+    {
+      "candidate_id": "HR-PRD-03-CANDIDATE-EXPA2",
+      "strategy_name": "HR Volatility Breakout Pro [Candidate Exp A2]",
+      "pine_file": "src/candidates/HR_Volatility_Breakout_Candidate_ExpA2.pine",
+      "source_sha256": "FROZEN_AT_PHASE_11",
+      "symbol": "XAUUSD",
+      "timeframe": "15",
+      "htf_filter_timeframe": "60",
+      "parameters": {
+        "boxLookback": 20,
+        "squeezeThreshold": 2.20,
+        "requireVolume": true,
+        "minVolumeMult": 1.10,
+        "useMonetarySizing": true,
+        "riskPercent": 0.5,
+        "rrMultiplier": 2.5,
+        "slBufferAtr": 0.20,
+        "cooldownBars": 5,
+        "contractMult": 1.0,
+        "minVolumeStep": 0.01,
+        "maxRiskUsdCap": 100.0
+      },
+      "execution_modeling": {
+        "commission_pct": 0.02,
+        "slippage_ticks": 2,
+        "tick_size": 0.01,
+        "point_value": 1.0,
+        "process_orders_on_close": true
+      },
+      "gate_status": "NATIVE-COMPILATION-PENDING"
+    },
+    {
+      "candidate_id": "HR-PRD-04-CANDIDATE-FORWARD",
+      "strategy_name": "HR Market Structure Momentum Pro [Candidate Forward]",
+      "pine_file": "src/candidates/HR_Market_Structure_Candidate_Forward.pine",
+      "source_sha256": "FROZEN_AT_PHASE_11",
+      "symbol": "XAUUSD",
+      "timeframe": "15",
+      "htf_filter_timeframe": "60",
+      "parameters": {
+        "pivotStrength": 3,
+        "lookbackWindow": 40,
+        "rsiPeriod": 14,
+        "bullishRsiMin": 53.0,
+        "bearishRsiMax": 47.0,
+        "useHtfFilter": true,
+        "htfTF": "60",
+        "htfEmaLen": 200,
+        "minEntryScore": 70,
+        "minSignalGrade": "A and Above",
+        "atrLen": 14,
+        "slBufferAtr": 0.15,
+        "rrMultiplier": 2.4,
+        "cooldownBars": 5,
+        "useMonetaryRisk": true,
+        "riskPercent": 0.5,
+        "contractMult": 1.0,
+        "minVolumeStep": 0.01,
+        "maxRiskUsdCap": 100.0
+      },
+      "execution_modeling": {
+        "commission_pct": 0.02,
+        "slippage_ticks": 2,
+        "tick_size": 0.01,
+        "point_value": 1.0,
+        "process_orders_on_close": true
+      },
+      "gate_status": "NATIVE-COMPILATION-PENDING"
+    }
+  ]
+}
