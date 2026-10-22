@@ -10,13 +10,22 @@ Executes multi-regime backtests for all 5 Pine Script v6 strategies:
 """
 
 import math
-import numpy as np
+import random
+try:
+    import numpy as np
+    _HAS_NUMPY = True
+except ImportError:
+    np = None
+    _HAS_NUMPY = False
 from typing import Dict, List, Any, Tuple
 
 class MarketDataGenerator:
     @staticmethod
     def generate_candles(regime: str = "trending_bull", length: int = 1000, seed: int = 42) -> List[Dict[str, float]]:
-        np.random.seed(seed)
+        if _HAS_NUMPY:
+            np.random.seed(seed)
+        else:
+            random.seed(seed)
         candles = []
         price = 100.0 if "forex" in regime else 2000.0 # e.g. Gold/Index level
         
@@ -40,12 +49,22 @@ class MarketDataGenerator:
                 drift = 0.0002
                 volatility = 0.005
 
-            ret = drift + np.random.normal(0, volatility)
+            if _HAS_NUMPY:
+                norm1 = np.random.normal(0, volatility)
+                norm2 = abs(np.random.normal(0, volatility * 0.5))
+                norm3 = abs(np.random.normal(0, volatility * 0.5))
+                vol = float(np.random.gamma(shape=2.0, scale=1000.0))
+            else:
+                norm1 = random.gauss(0, volatility)
+                norm2 = abs(random.gauss(0, volatility * 0.5))
+                norm3 = abs(random.gauss(0, volatility * 0.5))
+                vol = float(random.gammavariate(2.0, 1000.0))
+
+            ret = drift + norm1
             open_p = price
             close_p = price * (1.0 + ret)
-            high_p = max(open_p, close_p) * (1.0 + abs(np.random.normal(0, volatility * 0.5)))
-            low_p = min(open_p, close_p) * (1.0 - abs(np.random.normal(0, volatility * 0.5)))
-            vol = float(np.random.gamma(shape=2.0, scale=1000.0))
+            high_p = max(open_p, close_p) * (1.0 + norm2)
+            low_p = min(open_p, close_p) * (1.0 - norm3)
             
             candles.append({
                 "open": open_p,
