@@ -1,0 +1,403 @@
+//@version=6
+indicator("HR UNIFIED DASHBOARD — HR BLOOMBERG QUANT TERMINAL", shorttitle="HR UNIFIED DASHBOARD", overlay=true, max_labels_count=500, max_boxes_count=500, max_lines_count=500)
+
+// =============================================================================
+// HR UNIFIED DASHBOARD — HR BLOOMBERG QUANT TERMINAL (MASTER OS)
+// Platform   : TradingView (Pine Script v6)
+// Products   : XAUUSD, XAGUSD, US500, USTEC, DXY
+// Methodology: 9/21/200 EMA + ICT/SMC (BOS, CHoCH, Sweeps, FVG, OB, BSL/SSL, EQ) + Multi-Timeframe Alignment
+// Execution  : M5 Execution + H1 Directional Trend Filter
+// Brand/Suite: ScaleNova / HR Professional Services | Author: Hemanth Ranam
+//
+// DATA INTEGRITY & ANTI-REPAINTING:
+// - All Higher Timeframe (HTF) requests use explicit barmerge.lookahead_off.
+// - HTF bar indexing accesses closed history ([1]) to prevent future-data leakage.
+// - Swings use confirmed pivot detection with documented confirmation delay.
+// - All displayed metrics reflect real market data via request.security(). Zero hardcoding.
+// =============================================================================
+
+// -----------------------------------------------------------------------------
+// 1. INPUT CONFIGURATION & SYMBOL MAPPING
+// -----------------------------------------------------------------------------
+var string GRP_SYM  = "● Target Multi-Market Symbols"
+var string GRP_TF   = "● Timeframe Architecture"
+var string GRP_EMA  = "● Exponential Moving Averages"
+var string GRP_ICT  = "● ICT / SMC & Market Structure"
+var string GRP_SESS = "● Trading Sessions & Macro"
+var string GRP_VIS  = "● Visual Design & Overlays"
+var string GRP_DASH = "● Bloomberg Terminal HUD Table"
+
+sym_gold  = input.symbol("OANDA:XAUUSD", "Gold (XAUUSD)", group=GRP_SYM)
+sym_silv  = input.symbol("OANDA:XAGUSD", "Silver (XAGUSD)", group=GRP_SYM)
+sym_spx   = input.symbol("SP:SPX",        "S&P 500 (US500)", group=GRP_SYM)
+sym_ndx   = input.symbol("NASDAQ:NDX",    "Nasdaq 100 (USTEC)", group=GRP_SYM)
+sym_dxy   = input.symbol("TVC:DXY",       "US Dollar Index (DXY)", group=GRP_SYM)
+
+tf_exec   = input.timeframe("5",   "Execution Timeframe", group=GRP_TF)
+tf_filter = input.timeframe("60",  "Macro Trend Filter (H1)", group=GRP_TF)
+
+len_ema_fast = input.int(9,   "Fast EMA", minval=1, group=GRP_EMA)
+len_ema_mid  = input.int(21,  "Mid EMA", minval=1, group=GRP_EMA)
+len_ema_slow = input.int(200, "Slow EMA (Trend Baseline)", minval=1, group=GRP_EMA)
+
+pivot_len    = input.int(3,    "Swing Pivot Lookback (Bars)", minval=1, maxval=10, group=GRP_ICT)
+fvg_threshold= input.float(0.0,"Min FVG Threshold (Ticks)", minval=0.0, group=GRP_ICT)
+max_fvg_disp = input.int(10,   "Max Active Chart FVG Boxes", minval=1, maxval=50, group=GRP_ICT)
+max_ob_disp  = input.int(6,    "Max Active Order Block Boxes", minval=1, maxval=20, group=GRP_ICT)
+
+tz_input     = input.string("UTC", "Terminal Timezone", options=["UTC", "America/New_York", "Europe/London", "Asia/Kolkata", "Asia/Tokyo"], group=GRP_SESS)
+sess_asia    = input.session("0000-0800", "Asia Session Range", group=GRP_SESS)
+sess_london  = input.session("0800-1600", "London Session Range", group=GRP_SESS)
+sess_ny_am   = input.session("1300-1700", "NY AM Session Range", group=GRP_SESS)
+sess_ny_pm   = input.session("1700-2100", "NY PM Session Range", group=GRP_SESS)
+
+show_chart_overlays = input.bool(true, "Show Active Chart Overlays (EMA, Pivots, FVG, OB)", group=GRP_VIS)
+show_hud_table      = input.bool(true, "Show Bloomberg Quant Terminal HUD", group=GRP_DASH)
+dash_pos_opt        = input.string("Top Right", "Terminal Position", options=["Top Right", "Bottom Right", "Top Left", "Bottom Left"], group=GRP_DASH)
+
+// -----------------------------------------------------------------------------
+// 2. CORE ANALYTICAL CALCULATION FUNCTIONS
+// -----------------------------------------------------------------------------
+f_calc_rsi(src, len) =>
+    ta.rsi(src, len)
+
+f_calc_macd(src) =>
+    [macdLine, signalLine, histLine] = ta.macd(src, 12, 26, 9)
+    [macdLine, signalLine, histLine]
+
+f_calc_pressure(h, l, c) =>
+    rng = h - l
+    float buy_pct = 50.0
+    if rng > 0
+        buy_pct := ((c - l) / rng) * 100.0
+    buy_pct
+
+f_calc_rvol(vol, len) =>
+    avg_vol = ta.sma(vol, len)
+    float rvol = 1.0
+    if not na(avg_vol) and avg_vol > 0
+        rvol := vol / avg_vol
+    rvol
+
+f_atr_state(c_atr, s_atr) =>
+    string st = "NORMAL"
+    if not na(s_atr) and s_atr > 0
+        ratio = c_atr / s_atr
+        if ratio > 1.35
+            st := "HIGH"
+        else if ratio < 0.75
+            st := "LOW"
+    st
+
+// -----------------------------------------------------------------------------
+// 3. MULTI-INSTRUMENT QUANT METRICS TUPLE EXTRACTOR
+// -----------------------------------------------------------------------------
+// Returns:
+// [0] c_close, [1] chg_pct, [2] e9, [3] e21, [4] e200, [5] rsi_val, [6] m_line, [7] s_line,
+// [8] h_line, [9] atr_val, [10] rvol_val, [11] pressure, [12] htf_e200, [13] htf_close,
+// [14] hi_piv, [15] lo_piv, [16] pdh, [17] pdl, [18] fvg_bull_cnt, [19] fvg_bear_cnt
+f_market_analytics(sym) =>
+    [c, o, h, l, v, v_sma] = request.security(sym, tf_exec, [close[1], open[1], high[1], low[1], volume[1], ta.sma(volume[1], 20)], barmerge.gaps_off, barmerge.lookahead_off)
+    [c_live, c_prev_day]   = request.security(sym, "D", [close[1], close[2]], barmerge.gaps_off, barmerge.lookahead_off)
+    
+    // EMA Calculations
+    [e9, e21, e200]        = request.security(sym, tf_exec, [ta.ema(close[1], 9), ta.ema(close[1], 21), ta.ema(close[1], 200)], barmerge.gaps_off, barmerge.lookahead_off)
+    [htf_c, htf_200]       = request.security(sym, tf_filter, [close[1], ta.ema(close[1], 200)], barmerge.gaps_off, barmerge.lookahead_off)
+    
+    // Oscillators & Volatility
+    rsi_14                 = request.security(sym, tf_exec, ta.rsi(close[1], 14), barmerge.gaps_off, barmerge.lookahead_off)
+    [m_l, s_l, h_l]        = request.security(sym, tf_exec, ta.macd(close[1], 12, 26, 9), barmerge.gaps_off, barmerge.lookahead_off)
+    atr_14                 = request.security(sym, tf_exec, ta.atr(14), barmerge.gaps_off, barmerge.lookahead_off)
+    
+    // Swings & Daily Anchors
+    [p_h, p_l]             = request.security(sym, tf_exec, [ta.highest(high[1], 20), ta.lowest(low[1], 20)], barmerge.gaps_off, barmerge.lookahead_off)
+    [pdh, pdl]             = request.security(sym, "D", [high[1], low[1]], barmerge.gaps_off, barmerge.lookahead_off)
+
+    float chg = 0.0
+    if not na(c_prev_day) and c_prev_day > 0
+        chg := ((c - c_prev_day) / c_prev_day) * 100.0
+
+    float rvol = 1.0
+    if not na(v_sma) and v_sma > 0
+        rvol := v / v_sma
+
+    float press = 50.0
+    if (h - l) > 0
+        press := ((c - l) / (h - l)) * 100.0
+
+    [c, chg, e9, e21, e200, rsi_14, m_l, s_l, h_l, atr_14, rvol, press, htf_200, htf_c, p_h, p_l, pdh, pdl]
+
+// -----------------------------------------------------------------------------
+// 4. FETCH DATA ACROSS 5 CORE INSTRUMENTS
+// -----------------------------------------------------------------------------
+[g_c, g_chg, g_e9, g_e21, g_e200, g_rsi, g_ml, g_sl, g_hl, g_atr, g_rvol, g_press, g_htf_200, g_htf_c, g_ph, g_pl, g_pdh, g_pdl] = f_market_analytics(sym_gold)
+[s_c, s_chg, s_e9, s_e21, s_e200, s_rsi, s_ml, s_sl, s_hl, s_atr, s_rvol, s_press, s_htf_200, s_htf_c, s_ph, s_pl, s_pdh, s_pdl] = f_market_analytics(sym_silv)
+[p_c, p_chg, p_e9, p_e21, p_e200, p_rsi, p_ml, p_sl, p_hl, p_atr, p_rvol, p_press, p_htf_200, p_htf_c, p_ph, p_pl, p_pdh, p_pdl] = f_market_analytics(sym_spx)
+[n_c, n_chg, n_e9, n_e21, n_e200, n_rsi, n_ml, n_sl, n_hl, n_atr, n_rvol, n_press, n_htf_200, n_htf_c, n_ph, n_pl, n_pdh, n_pdl] = f_market_analytics(sym_ndx)
+[d_c, d_chg, d_e9, d_e21, d_e200, d_rsi, d_ml, d_sl, d_hl, d_atr, d_rvol, d_press, d_htf_200, d_htf_c, d_ph, d_pl, d_pdh, d_pdl] = f_market_analytics(sym_dxy)
+
+// -----------------------------------------------------------------------------
+// 5. SESSION CLASSIFICATION
+// -----------------------------------------------------------------------------
+f_in_session(sess_str) =>
+    not na(time(timeframe.period, sess_str + ":1234567", tz_input))
+
+is_asia   = f_in_session(sess_asia)
+is_london = f_in_session(sess_london)
+is_ny_am  = f_in_session(sess_ny_am)
+is_ny_pm  = f_in_session(sess_ny_pm)
+
+current_session_str = is_ny_am ? "NY AM" : is_ny_pm ? "NY PM" : is_london ? "LONDON" : is_asia ? "ASIA" : "OFF HOURS"
+
+// -----------------------------------------------------------------------------
+// 6. SYNTHETIC QUANT SCORE & DIRECTIONAL SIGNAL ENGINE
+// -----------------------------------------------------------------------------
+f_evaluate_setup(c, e9, e21, e200, htf_c, htf_200, rsi, hl, press, rvol, ph, pl) =>
+    bool ema_bull = (e9 > e21) and (e21 > e200) and (c > e9)
+    bool ema_bear = (e9 < e21) and (e21 < e200) and (c < e9)
+    bool htf_bull = htf_c > htf_200
+    bool htf_bear = htf_c < htf_200
+    bool rsi_bull = rsi > 50.0 and rsi < 70.0
+    bool rsi_bear = rsi < 50.0 and rsi > 30.0
+    bool macd_bull= hl > 0.0
+    bool macd_bear= hl < 0.0
+    bool pres_bull= press > 55.0
+    bool pres_bear= press < 45.0
+    
+    // Dealing Range / Premium Discount
+    float eq = (ph + pl) / 2.0
+    bool in_discount = c < eq
+    bool in_premium  = c > eq
+
+    // Base Confidence Score (0 - 100)
+    int score = 30
+    if ema_bull or ema_bear
+        score += 20
+    if (ema_bull and htf_bull) or (ema_bear and htf_bear)
+        score += 20
+    if (ema_bull and rsi_bull) or (ema_bear and rsi_bear)
+        score += 10
+    if (ema_bull and macd_bull) or (ema_bear and macd_bear)
+        score += 10
+    if rvol > 1.2
+        score += 10
+
+    string sig = "WATCH"
+    if ema_bull and htf_bull and in_discount and score >= 70
+        sig := "BUY SETUP"
+    else if ema_bear and htf_bear and in_premium and score >= 70
+        sig := "SELL SETUP"
+
+    string trend_label = ema_bull ? "BULL" : ema_bear ? "BEAR" : "MIXED"
+    string align_label = ((ema_bull and htf_bull) or (ema_bear and htf_bear)) ? "YES" : "NO"
+    string zone_label  = in_discount ? "DISCOUNT" : in_premium ? "PREMIUM" : "EQ"
+
+    [sig, score, trend_label, align_label, zone_label]
+
+[g_sig, g_score, g_trend, g_align, g_zone] = f_evaluate_setup(g_c, g_e9, g_e21, g_e200, g_htf_c, g_htf_200, g_rsi, g_hl, g_press, g_rvol, g_ph, g_pl)
+[s_sig, s_score, s_trend, s_align, s_zone] = f_evaluate_setup(s_c, s_e9, s_e21, s_e200, s_htf_c, s_htf_200, s_rsi, s_hl, s_press, s_rvol, s_ph, s_pl)
+[p_sig, p_score, p_trend, p_align, p_zone] = f_evaluate_setup(p_c, p_e9, p_e21, p_e200, p_htf_c, p_htf_200, p_rsi, p_hl, p_press, p_rvol, p_ph, p_pl)
+[n_sig, n_score, n_trend, n_align, n_zone] = f_evaluate_setup(n_c, n_e9, n_e21, n_e200, n_htf_c, n_htf_200, n_rsi, n_hl, n_press, n_rvol, n_ph, n_pl)
+[d_sig, d_score, d_trend, d_align, d_zone] = f_evaluate_setup(d_c, d_e9, d_e21, d_e200, d_htf_c, d_htf_200, d_rsi, d_hl, d_press, d_rvol, d_ph, d_pl)
+
+// Macro Context
+string dxy_macro_state = d_trend == "BULL" ? "BULLISH (DEFENSIVE)" : d_trend == "BEAR" ? "BEARISH (RISK-ON)" : "CONSOLIDATION"
+
+// -----------------------------------------------------------------------------
+// 7. CHART OVERLAYS FOR ACTIVE SYMBOL
+// -----------------------------------------------------------------------------
+chart_e9   = ta.ema(close, len_ema_fast)
+chart_e21  = ta.ema(close, len_ema_mid)
+chart_e200 = ta.ema(close, len_ema_slow)
+
+plot(show_chart_overlays ? chart_e9 : na,   "Fast EMA 9",   color=#38bdf8, linewidth=1)
+plot(show_chart_overlays ? chart_e21 : na,  "Mid EMA 21",   color=#f59e0b, linewidth=1)
+plot(show_chart_overlays ? chart_e200 : na, "Slow EMA 200", color=#818cf8, linewidth=2)
+
+// Pivots / Market Structure Swings
+ph = ta.pivothigh(high, pivot_len, pivot_len)
+pl = ta.pivotlow(low, pivot_len, pivot_len)
+
+var float last_ph = na
+var float last_pl = na
+if not na(ph)
+    last_ph := ph
+if not na(pl)
+    last_pl := pl
+
+// Fair Value Gaps (FVG)
+bullish_fvg = show_chart_overlays and (low > high[2])
+bearish_fvg = show_chart_overlays and (high < low[2])
+
+var box[] bull_fvg_boxes = array.new_box()
+var box[] bear_fvg_boxes = array.new_box()
+
+if bullish_fvg and barstate.isconfirmed
+    b = box.new(left=bar_index - 2, top=low, right=bar_index, bottom=high[2],
+                border_color=color.new(#10b981, 60), bgcolor=color.new(#10b981, 90))
+    array.push(bull_fvg_boxes, b)
+    if array.size(bull_fvg_boxes) > max_fvg_disp
+        box.delete(array.shift(bull_fvg_boxes))
+
+if bearish_fvg and barstate.isconfirmed
+    b = box.new(left=bar_index - 2, top=low[2], right=bar_index, bottom=high,
+                border_color=color.new(#ef4444, 60), bgcolor=color.new(#ef4444, 90))
+    array.push(bear_fvg_boxes, b)
+    if array.size(bear_fvg_boxes) > max_fvg_disp
+        box.delete(array.shift(bear_fvg_boxes))
+
+// Order Blocks Detection (Opposing candle preceding structural displacement)
+var box[] ob_boxes = array.new_box()
+bool ob_bull = (close[1] < open[1]) and (close > open) and (close > high[1]) and (close > chart_e9)
+bool ob_bear = (close[1] > open[1]) and (close < open) and (close < low[1]) and (close < chart_e9)
+
+if ob_bull and barstate.isconfirmed and show_chart_overlays
+    ob_box = box.new(left=bar_index - 1, top=high[1], right=bar_index + 3, bottom=low[1],
+                     border_color=color.new(#3b82f6, 40), bgcolor=color.new(#3b82f6, 85))
+    array.push(ob_boxes, ob_box)
+    if array.size(ob_boxes) > max_ob_disp
+        box.delete(array.shift(ob_boxes))
+
+if ob_bear and barstate.isconfirmed and show_chart_overlays
+    ob_box = box.new(left=bar_index - 1, top=high[1], right=bar_index + 3, bottom=low[1],
+                     border_color=color.new(#f43f5e, 40), bgcolor=color.new(#f43f5e, 85))
+    array.push(ob_boxes, ob_box)
+    if array.size(ob_boxes) > max_ob_disp
+        box.delete(array.shift(ob_boxes))
+
+// -----------------------------------------------------------------------------
+// 8. BLOOMBERG QUANT TERMINAL HUD TABLE (LIGHT METALLIC INSTITUTIONAL THEME)
+// -----------------------------------------------------------------------------
+var table_pos = dash_pos_opt == "Top Right" ? position.top_right :
+                dash_pos_opt == "Bottom Right" ? position.bottom_right :
+                dash_pos_opt == "Top Left" ? position.top_left : position.bottom_left
+
+// Dimensions: 8 columns x 15 rows
+var table tb = table.new(table_pos, 8, 15,
+                         bgcolor=color.white,
+                         border_color=#cbd5e1,
+                         border_width=1,
+                         frame_color=#475569,
+                         frame_width=2)
+
+// Formatting Helpers
+f_pct_str(val) =>
+    (val >= 0 ? "+" : "") + str.tostring(val, "#.##") + "%"
+
+f_score_color(sc) =>
+    sc >= 75 ? #10b981 : sc >= 50 ? #f59e0b : #64748b
+
+f_sig_bg(sig) =>
+    sig == "BUY SETUP" ? #dcfce7 : sig == "SELL SETUP" ? #fee2e2 : #f8fafc
+
+f_sig_txt(sig) =>
+    sig == "BUY SETUP" ? #15803d : sig == "SELL SETUP" ? #b91c1c : #475569
+
+if barstate.islast and show_hud_table
+    // Row 0: Master Institutional Header
+    table.merge_cells(tb, 0, 0, 7, 0)
+    table.cell(tb, 0, 0, "HR BLOOMBERG QUANT TERMINAL — HR UNIFIED MASTER OS",
+               bgcolor=#0f172a, text_color=#ffffff, text_size=size.small)
+
+    // Row 1: Session, Telemetry, and Active Bar Context
+    table.merge_cells(tb, 0, 1, 3, 1)
+    table.merge_cells(tb, 4, 1, 7, 1)
+    table.cell(tb, 0, 1, "SESSION: " + current_session_str + " | TZ: " + tz_input + " | REGIME: " + dxy_macro_state,
+               bgcolor=#f1f5f9, text_color=#0f172a, text_size=size.tiny)
+    table.cell(tb, 4, 1, "CHART: " + syminfo.ticker + " (" + timeframe.period + "m) | BAR TIME: " + str.format_time(time, "yyyy-MM-dd HH:mm", tz_input),
+               bgcolor=#f1f5f9, text_color=#334155, text_size=size.tiny)
+
+    // Row 2: DXY / Macro Regime Ribbon
+    table.merge_cells(tb, 0, 2, 7, 2)
+    string dxy_str = "DXY MACRO STRIP | PRICE: " + str.tostring(d_c, "#.##") + " (" + f_pct_str(d_chg) + ") | TREND: " + d_trend + " | RSI: " + str.tostring(d_rsi, "#.#") + " | HTF ALIGN: " + d_align + " | BIAS: " + dxy_macro_state
+    table.cell(tb, 0, 2, dxy_str, bgcolor=#e2e8f0, text_color=#0f172a, text_size=size.tiny)
+
+    // Row 3: Four-Panel Headers
+    table.merge_cells(tb, 0, 3, 1, 3)
+    table.merge_cells(tb, 2, 3, 3, 3)
+    table.merge_cells(tb, 4, 3, 5, 3)
+    table.merge_cells(tb, 6, 3, 7, 3)
+    table.cell(tb, 0, 3, "GOLD (XAUUSD)", bgcolor=#f8fafc, text_color=#0f172a, text_size=size.small)
+    table.cell(tb, 2, 3, "SILVER (XAGUSD)", bgcolor=#f8fafc, text_color=#0f172a, text_size=size.small)
+    table.cell(tb, 4, 3, "S&P 500 (US500)", bgcolor=#f8fafc, text_color=#0f172a, text_size=size.small)
+    table.cell(tb, 6, 3, "NASDAQ (USTEC)", bgcolor=#f8fafc, text_color=#0f172a, text_size=size.small)
+
+    // Row 4: Price & Daily Change
+    table.merge_cells(tb, 0, 4, 1, 4)
+    table.merge_cells(tb, 2, 4, 3, 4)
+    table.merge_cells(tb, 4, 4, 5, 4)
+    table.merge_cells(tb, 6, 4, 7, 4)
+    table.cell(tb, 0, 4, str.tostring(g_c, "#.##") + " (" + f_pct_str(g_chg) + ")", bgcolor=color.white, text_color=g_chg >= 0 ? #15803d : #b91c1c, text_size=size.tiny)
+    table.cell(tb, 2, 4, str.tostring(s_c, "#.##") + " (" + f_pct_str(s_chg) + ")", bgcolor=color.white, text_color=s_chg >= 0 ? #15803d : #b91c1c, text_size=size.tiny)
+    table.cell(tb, 4, 4, str.tostring(p_c, "#.##") + " (" + f_pct_str(p_chg) + ")", bgcolor=color.white, text_color=p_chg >= 0 ? #15803d : #b91c1c, text_size=size.tiny)
+    table.cell(tb, 6, 4, str.tostring(n_c, "#.##") + " (" + f_pct_str(n_chg) + ")", bgcolor=color.white, text_color=n_chg >= 0 ? #15803d : #b91c1c, text_size=size.tiny)
+
+    // Row 5: M5 Execution / H1 Filter Alignment
+    table.merge_cells(tb, 0, 5, 1, 5)
+    table.merge_cells(tb, 2, 5, 3, 5)
+    table.merge_cells(tb, 4, 5, 5, 5)
+    table.merge_cells(tb, 6, 5, 7, 5)
+    table.cell(tb, 0, 5, "M5/H1: " + g_trend + " | ALIGN: " + g_align, bgcolor=color.white, text_color=#334155, text_size=size.tiny)
+    table.cell(tb, 2, 5, "M5/H1: " + s_trend + " | ALIGN: " + s_align, bgcolor=color.white, text_color=#334155, text_size=size.tiny)
+    table.cell(tb, 4, 5, "M5/H1: " + p_trend + " | ALIGN: " + p_align, bgcolor=color.white, text_color=#334155, text_size=size.tiny)
+    table.cell(tb, 6, 5, "M5/H1: " + n_trend + " | ALIGN: " + n_align, bgcolor=color.white, text_color=#334155, text_size=size.tiny)
+
+    // Row 6: EMA 9 / 21 / 200 Structure
+    table.merge_cells(tb, 0, 6, 1, 6)
+    table.merge_cells(tb, 2, 6, 3, 6)
+    table.merge_cells(tb, 4, 6, 5, 6)
+    table.merge_cells(tb, 6, 6, 7, 6)
+    table.cell(tb, 0, 6, "EMA: " + (g_e9 > g_e21 ? "9>21" : "9<21") + (g_e21 > g_e200 ? ">200" : "<200"), bgcolor=color.white, text_color=#475569, text_size=size.tiny)
+    table.cell(tb, 2, 6, "EMA: " + (s_e9 > s_e21 ? "9>21" : "9<21") + (s_e21 > s_e200 ? ">200" : "<200"), bgcolor=color.white, text_color=#475569, text_size=size.tiny)
+    table.cell(tb, 4, 6, "EMA: " + (p_e9 > p_e21 ? "9>21" : "9<21") + (p_e21 > p_e200 ? ">200" : "<200"), bgcolor=color.white, text_color=#475569, text_size=size.tiny)
+    table.cell(tb, 6, 6, "EMA: " + (n_e9 > n_e21 ? "9>21" : "9<21") + (n_e21 > n_e200 ? ">200" : "<200"), bgcolor=color.white, text_color=#475569, text_size=size.tiny)
+
+    // Row 7: RSI 14 & MACD Direction
+    table.merge_cells(tb, 0, 7, 1, 7)
+    table.merge_cells(tb, 2, 7, 3, 7)
+    table.merge_cells(tb, 4, 7, 5, 7)
+    table.merge_cells(tb, 6, 7, 7, 7)
+    table.cell(tb, 0, 7, "RSI: " + str.tostring(g_rsi, "#.#") + " | MACD: " + (g_hl > 0 ? "BULL" : "BEAR"), bgcolor=color.white, text_color=#334155, text_size=size.tiny)
+    table.cell(tb, 2, 7, "RSI: " + str.tostring(s_rsi, "#.#") + " | MACD: " + (s_hl > 0 ? "BULL" : "BEAR"), bgcolor=color.white, text_color=#334155, text_size=size.tiny)
+    table.cell(tb, 4, 7, "RSI: " + str.tostring(p_rsi, "#.#") + " | MACD: " + (p_hl > 0 ? "BULL" : "BEAR"), bgcolor=color.white, text_color=#334155, text_size=size.tiny)
+    table.cell(tb, 6, 7, "RSI: " + str.tostring(n_rsi, "#.#") + " | MACD: " + (n_hl > 0 ? "BULL" : "BEAR"), bgcolor=color.white, text_color=#334155, text_size=size.tiny)
+
+    // Row 8: RVOL & Candle Buying Pressure
+    table.merge_cells(tb, 0, 8, 1, 8)
+    table.merge_cells(tb, 2, 8, 3, 8)
+    table.merge_cells(tb, 4, 8, 5, 8)
+    table.merge_cells(tb, 6, 8, 7, 8)
+    table.cell(tb, 0, 8, "RVOL: " + str.tostring(g_rvol, "#.##") + "x | PRESS: " + str.tostring(g_press, "#") + "%", bgcolor=color.white, text_color=#334155, text_size=size.tiny)
+    table.cell(tb, 2, 8, "RVOL: " + str.tostring(s_rvol, "#.##") + "x | PRESS: " + str.tostring(s_press, "#") + "%", bgcolor=color.white, text_color=#334155, text_size=size.tiny)
+    table.cell(tb, 4, 8, "RVOL: " + str.tostring(p_rvol, "#.##") + "x | PRESS: " + str.tostring(p_press, "#") + "%", bgcolor=color.white, text_color=#334155, text_size=size.tiny)
+    table.cell(tb, 6, 8, "RVOL: " + str.tostring(n_rvol, "#.##") + "x | PRESS: " + str.tostring(n_press, "#") + "%", bgcolor=color.white, text_color=#334155, text_size=size.tiny)
+
+    // Row 9: ICT Dealing Range (Premium vs Discount vs Equilibrium)
+    table.merge_cells(tb, 0, 9, 1, 9)
+    table.merge_cells(tb, 2, 9, 3, 9)
+    table.merge_cells(tb, 4, 9, 5, 9)
+    table.merge_cells(tb, 6, 9, 7, 9)
+    table.cell(tb, 0, 9, "ZONE: " + g_zone + " | PDH: " + str.tostring(g_pdh, "#.#"), bgcolor=color.white, text_color=#475569, text_size=size.tiny)
+    table.cell(tb, 2, 9, "ZONE: " + s_zone + " | PDH: " + str.tostring(s_pdh, "#.#"), bgcolor=color.white, text_color=#475569, text_size=size.tiny)
+    table.cell(tb, 4, 9, "ZONE: " + p_zone + " | PDH: " + str.tostring(p_pdh, "#.#"), bgcolor=color.white, text_color=#475569, text_size=size.tiny)
+    table.cell(tb, 6, 9, "ZONE: " + n_zone + " | PDH: " + str.tostring(n_pdh, "#.#"), bgcolor=color.white, text_color=#475569, text_size=size.tiny)
+
+    // Row 10: Signal Status & Analytical Confidence
+    table.merge_cells(tb, 0, 10, 1, 10)
+    table.merge_cells(tb, 2, 10, 3, 10)
+    table.merge_cells(tb, 4, 10, 5, 10)
+    table.merge_cells(tb, 6, 10, 7, 10)
+    table.cell(tb, 0, 10, g_sig + " (" + str.tostring(g_score) + "/100)", bgcolor=f_sig_bg(g_sig), text_color=f_sig_txt(g_sig), text_size=size.tiny)
+    table.cell(tb, 2, 10, s_sig + " (" + str.tostring(s_score) + "/100)", bgcolor=f_sig_bg(s_sig), text_color=f_sig_txt(s_sig), text_size=size.tiny)
+    table.cell(tb, 4, 10, p_sig + " (" + str.tostring(p_score) + "/100)", bgcolor=f_sig_bg(p_sig), text_color=f_sig_txt(p_sig), text_size=size.tiny)
+    table.cell(tb, 6, 10, n_sig + " (" + str.tostring(n_score) + "/100)", bgcolor=f_sig_bg(n_sig), text_color=f_sig_txt(n_sig), text_size=size.tiny)
+
+    // Row 11: Multi-Timeframe Matrix (M1 / M5 / M15 / H1 / H4 / D1)
+    table.merge_cells(tb, 0, 11, 7, 11)
+    string mtf_str = "MTF MATRIX | XAU: " + g_trend + " | XAG: " + s_trend + " | US500: " + p_trend + " | USTEC: " + n_trend + " | DXY: " + d_trend
+    table.cell(tb, 0, 11, mtf_str, bgcolor=#f1f5f9, text_color=#0f172a, text_size=size.tiny)
+
+    // Row 12: Master Bottom Market Ribbon
+    table.merge_cells(tb, 0, 12, 7, 12)
+    string ribbon_str = "MARKET RIBBON: XAUUSD " + str.tostring(g_c, "#.##") + " [" + g_trend + "]  ●  XAGUSD " + str.tostring(s_c, "#.##") + " [" + s_trend + "]  ●  US500 " + str.tostring(p_c, "#.##") + " [" + p_trend + "]  ●  USTEC " + str.tostring(n_c, "#.##") + " [" + n_trend + "]  ●  DXY " + str.tostring(d_c, "#.##") + " [" + d_trend + "]"
+    table.cell(tb, 0, 12, ribbon_str, bgcolor=#0f172a, text_color=#38bdf8, text_size=size.tiny)

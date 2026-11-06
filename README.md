@@ -1,6 +1,34 @@
-# HR TradingView Strategy & Commercial Indicator Suite
+# HR UNIFIED DASHBOARD — HR BLOOMBERG QUANT TERMINAL
+## TradingView + Python Analytics Master OS
 
 > **Regulatory & Risk Disclaimer**: All trading strategies, indicators, backtests, and quantitative simulations in this repository are for research, educational, and software demonstration purposes only. They do not constitute financial advice or investment recommendations. Past performance in simulation or backtesting does not guarantee future results. Trading foreign exchange, commodities, indices, and derivatives carries substantial risk of loss. Always validate on paper trading accounts before deploying capital.
+
+---
+
+## Canonical TradingView Indicator: `HR_UNIFIED_DASHBOARD.pine`
+
+The primary multi-market institutional dashboard is located at the root of this repository:
+- **Canonical File**: [`HR_UNIFIED_DASHBOARD.pine`](HR_UNIFIED_DASHBOARD.pine)
+- **Release Mirror**: [`dashboards/HR_UNIFIED_DASHBOARD.pine`](dashboards/HR_UNIFIED_DASHBOARD.pine)
+
+### Quick TradingView Installation:
+1. Open [`HR_UNIFIED_DASHBOARD.pine`](HR_UNIFIED_DASHBOARD.pine) and copy the entire source code.
+2. In [TradingView](https://www.tradingview.com/), open **Pine Editor** at the bottom.
+3. Paste the code and click **Save as**: `HR Unified Dashboard — HR Bloomberg Quant Terminal`.
+4. Click **Add to chart**.
+5. Select your chart timeframe (`5m` recommended) and configure your broker symbols in the settings menu.
+
+---
+
+## Python Desktop Terminal: `python/app.py`
+
+The companion desktop analytics application is located in `python/`:
+```bash
+cd python
+pip install -r requirements.txt
+python app.py
+```
+See [`python/README.md`](python/README.md) for data schemas and last-candle snapshot architectures.
 
 ---
 
