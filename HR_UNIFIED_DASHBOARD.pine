@@ -1,8 +1,8 @@
 //@version=6
-indicator("HR UNIFIED DASHBOARD — HR BLOOMBERG QUANT TERMINAL", shorttitle="HR UNIFIED DASHBOARD", overlay=true, max_labels_count=500, max_boxes_count=500, max_lines_count=500)
+indicator("HR UNIFIED DASHBOARD - HR BLOOMBERG QUANT TERMINAL", shorttitle="HR-DASH", overlay=true, max_labels_count=500, max_boxes_count=500, max_lines_count=500)
 
 // =============================================================================
-// HR UNIFIED DASHBOARD — HR BLOOMBERG QUANT TERMINAL (MASTER OS)
+// HR UNIFIED DASHBOARD - HR BLOOMBERG QUANT TERMINAL (MASTER OS)
 // Platform   : TradingView (Pine Script v6)
 // Products   : XAUUSD, XAGUSD, US500, USTEC, DXY
 // Methodology: 9/21/200 EMA + ICT/SMC (BOS, CHoCH, Sweeps, FVG, OB, BSL/SSL, EQ) + Multi-Timeframe Alignment
@@ -19,13 +19,13 @@ indicator("HR UNIFIED DASHBOARD — HR BLOOMBERG QUANT TERMINAL", shorttitle="HR
 // -----------------------------------------------------------------------------
 // 1. INPUT CONFIGURATION & SYMBOL MAPPING
 // -----------------------------------------------------------------------------
-var string GRP_SYM  = "● Target Multi-Market Symbols"
-var string GRP_TF   = "● Timeframe Architecture"
-var string GRP_EMA  = "● Exponential Moving Averages"
-var string GRP_ICT  = "● ICT / SMC & Market Structure"
-var string GRP_SESS = "● Trading Sessions & Macro"
-var string GRP_VIS  = "● Visual Design & Overlays"
-var string GRP_DASH = "● Bloomberg Terminal HUD Table"
+var string GRP_SYM  = "Target Multi-Market Symbols"
+var string GRP_TF   = "Timeframe Architecture"
+var string GRP_EMA  = "Exponential Moving Averages"
+var string GRP_ICT  = "ICT / SMC & Market Structure"
+var string GRP_SESS = "Trading Sessions & Macro"
+var string GRP_VIS  = "Visual Design & Overlays"
+var string GRP_DASH = "Bloomberg Terminal HUD Table"
 
 sym_gold  = input.symbol("OANDA:XAUUSD", "Gold (XAUUSD)", group=GRP_SYM)
 sym_silv  = input.symbol("OANDA:XAGUSD", "Silver (XAGUSD)", group=GRP_SYM)
@@ -92,10 +92,6 @@ f_atr_state(c_atr, s_atr) =>
 // -----------------------------------------------------------------------------
 // 3. MULTI-INSTRUMENT QUANT METRICS TUPLE EXTRACTOR
 // -----------------------------------------------------------------------------
-// Returns:
-// [0] c_close, [1] chg_pct, [2] e9, [3] e21, [4] e200, [5] rsi_val, [6] m_line, [7] s_line,
-// [8] h_line, [9] atr_val, [10] rvol_val, [11] pressure, [12] htf_e200, [13] htf_close,
-// [14] hi_piv, [15] lo_piv, [16] pdh, [17] pdl, [18] fvg_bull_cnt, [19] fvg_bear_cnt
 f_market_analytics(sym) =>
     [c, o, h, l, v, v_sma] = request.security(sym, tf_exec, [close[1], open[1], high[1], low[1], volume[1], ta.sma(volume[1], 20)], barmerge.gaps_off, barmerge.lookahead_off)
     [c_live, c_prev_day]   = request.security(sym, "D", [close[1], close[2]], barmerge.gaps_off, barmerge.lookahead_off)
@@ -104,12 +100,12 @@ f_market_analytics(sym) =>
     [e9, e21, e200]        = request.security(sym, tf_exec, [ta.ema(close[1], 9), ta.ema(close[1], 21), ta.ema(close[1], 200)], barmerge.gaps_off, barmerge.lookahead_off)
     [htf_c, htf_200]       = request.security(sym, tf_filter, [close[1], ta.ema(close[1], 200)], barmerge.gaps_off, barmerge.lookahead_off)
     
-    // Oscillators & Volatility
+    // Oscillators and Volatility
     rsi_14                 = request.security(sym, tf_exec, ta.rsi(close[1], 14), barmerge.gaps_off, barmerge.lookahead_off)
     [m_l, s_l, h_l]        = request.security(sym, tf_exec, ta.macd(close[1], 12, 26, 9), barmerge.gaps_off, barmerge.lookahead_off)
     atr_14                 = request.security(sym, tf_exec, ta.atr(14), barmerge.gaps_off, barmerge.lookahead_off)
     
-    // Swings & Daily Anchors
+    // Swings and Daily Anchors
     [p_h, p_l]             = request.security(sym, tf_exec, [ta.highest(high[1], 20), ta.lowest(low[1], 20)], barmerge.gaps_off, barmerge.lookahead_off)
     [pdh, pdl]             = request.security(sym, "D", [high[1], low[1]], barmerge.gaps_off, barmerge.lookahead_off)
 
@@ -233,15 +229,13 @@ var box[] bull_fvg_boxes = array.new_box()
 var box[] bear_fvg_boxes = array.new_box()
 
 if bullish_fvg and barstate.isconfirmed
-    b = box.new(left=bar_index - 2, top=low, right=bar_index, bottom=high[2],
-                border_color=color.new(#10b981, 60), bgcolor=color.new(#10b981, 90))
+    b = box.new(left=bar_index - 2, top=low, right=bar_index, bottom=high[2], border_color=color.new(#10b981, 60), bgcolor=color.new(#10b981, 90))
     array.push(bull_fvg_boxes, b)
     if array.size(bull_fvg_boxes) > max_fvg_disp
         box.delete(array.shift(bull_fvg_boxes))
 
 if bearish_fvg and barstate.isconfirmed
-    b = box.new(left=bar_index - 2, top=low[2], right=bar_index, bottom=high,
-                border_color=color.new(#ef4444, 60), bgcolor=color.new(#ef4444, 90))
+    b = box.new(left=bar_index - 2, top=low[2], right=bar_index, bottom=high, border_color=color.new(#ef4444, 60), bgcolor=color.new(#ef4444, 90))
     array.push(bear_fvg_boxes, b)
     if array.size(bear_fvg_boxes) > max_fvg_disp
         box.delete(array.shift(bear_fvg_boxes))
@@ -252,15 +246,13 @@ bool ob_bull = (close[1] < open[1]) and (close > open) and (close > high[1]) and
 bool ob_bear = (close[1] > open[1]) and (close < open) and (close < low[1]) and (close < chart_e9)
 
 if ob_bull and barstate.isconfirmed and show_chart_overlays
-    ob_box = box.new(left=bar_index - 1, top=high[1], right=bar_index + 3, bottom=low[1],
-                     border_color=color.new(#3b82f6, 40), bgcolor=color.new(#3b82f6, 85))
+    ob_box = box.new(left=bar_index - 1, top=high[1], right=bar_index + 3, bottom=low[1], border_color=color.new(#3b82f6, 40), bgcolor=color.new(#3b82f6, 85))
     array.push(ob_boxes, ob_box)
     if array.size(ob_boxes) > max_ob_disp
         box.delete(array.shift(ob_boxes))
 
 if ob_bear and barstate.isconfirmed and show_chart_overlays
-    ob_box = box.new(left=bar_index - 1, top=high[1], right=bar_index + 3, bottom=low[1],
-                     border_color=color.new(#f43f5e, 40), bgcolor=color.new(#f43f5e, 85))
+    ob_box = box.new(left=bar_index - 1, top=high[1], right=bar_index + 3, bottom=low[1], border_color=color.new(#f43f5e, 40), bgcolor=color.new(#f43f5e, 85))
     array.push(ob_boxes, ob_box)
     if array.size(ob_boxes) > max_ob_disp
         box.delete(array.shift(ob_boxes))
@@ -268,17 +260,10 @@ if ob_bear and barstate.isconfirmed and show_chart_overlays
 // -----------------------------------------------------------------------------
 // 8. BLOOMBERG QUANT TERMINAL HUD TABLE (LIGHT METALLIC INSTITUTIONAL THEME)
 // -----------------------------------------------------------------------------
-var table_pos = dash_pos_opt == "Top Right" ? position.top_right :
-                dash_pos_opt == "Bottom Right" ? position.bottom_right :
-                dash_pos_opt == "Top Left" ? position.top_left : position.bottom_left
+var tbl_pos = dash_pos_opt == "Top Right" ? position.top_right : dash_pos_opt == "Bottom Right" ? position.bottom_right : dash_pos_opt == "Top Left" ? position.top_left : position.bottom_left
 
 // Dimensions: 8 columns x 15 rows
-var table tb = table.new(table_pos, 8, 15,
-                         bgcolor=color.white,
-                         border_color=#cbd5e1,
-                         border_width=1,
-                         frame_color=#475569,
-                         frame_width=2)
+var table tb = table.new(tbl_pos, 8, 15, bgcolor=color.white, border_color=#cbd5e1, border_width=1, frame_color=#475569, frame_width=2)
 
 // Formatting Helpers
 f_pct_str(val) =>
@@ -296,16 +281,13 @@ f_sig_txt(sig) =>
 if barstate.islast and show_hud_table
     // Row 0: Master Institutional Header
     table.merge_cells(tb, 0, 0, 7, 0)
-    table.cell(tb, 0, 0, "HR BLOOMBERG QUANT TERMINAL — HR UNIFIED MASTER OS",
-               bgcolor=#0f172a, text_color=#ffffff, text_size=size.small)
+    table.cell(tb, 0, 0, "HR BLOOMBERG QUANT TERMINAL - HR UNIFIED MASTER OS", bgcolor=#0f172a, text_color=#ffffff, text_size=size.small)
 
     // Row 1: Session, Telemetry, and Active Bar Context
     table.merge_cells(tb, 0, 1, 3, 1)
     table.merge_cells(tb, 4, 1, 7, 1)
-    table.cell(tb, 0, 1, "SESSION: " + current_session_str + " | TZ: " + tz_input + " | REGIME: " + dxy_macro_state,
-               bgcolor=#f1f5f9, text_color=#0f172a, text_size=size.tiny)
-    table.cell(tb, 4, 1, "CHART: " + syminfo.ticker + " (" + timeframe.period + "m) | BAR TIME: " + str.format_time(time, "yyyy-MM-dd HH:mm", tz_input),
-               bgcolor=#f1f5f9, text_color=#334155, text_size=size.tiny)
+    table.cell(tb, 0, 1, "SESSION: " + current_session_str + " | TZ: " + tz_input + " | REGIME: " + dxy_macro_state, bgcolor=#f1f5f9, text_color=#0f172a, text_size=size.tiny)
+    table.cell(tb, 4, 1, "CHART: " + syminfo.ticker + " (" + timeframe.period + "m) | BAR TIME: " + str.format_time(time, "yyyy-MM-dd HH:mm", tz_input), bgcolor=#f1f5f9, text_color=#334155, text_size=size.tiny)
 
     // Row 2: DXY / Macro Regime Ribbon
     table.merge_cells(tb, 0, 2, 7, 2)
@@ -399,5 +381,5 @@ if barstate.islast and show_hud_table
 
     // Row 12: Master Bottom Market Ribbon
     table.merge_cells(tb, 0, 12, 7, 12)
-    string ribbon_str = "MARKET RIBBON: XAUUSD " + str.tostring(g_c, "#.##") + " [" + g_trend + "]  ●  XAGUSD " + str.tostring(s_c, "#.##") + " [" + s_trend + "]  ●  US500 " + str.tostring(p_c, "#.##") + " [" + p_trend + "]  ●  USTEC " + str.tostring(n_c, "#.##") + " [" + n_trend + "]  ●  DXY " + str.tostring(d_c, "#.##") + " [" + d_trend + "]"
+    string ribbon_str = "MARKET RIBBON: XAUUSD " + str.tostring(g_c, "#.##") + " [" + g_trend + "]  |  XAGUSD " + str.tostring(s_c, "#.##") + " [" + s_trend + "]  |  US500 " + str.tostring(p_c, "#.##") + " [" + p_trend + "]  |  USTEC " + str.tostring(n_c, "#.##") + " [" + n_trend + "]  |  DXY " + str.tostring(d_c, "#.##") + " [" + d_trend + "]"
     table.cell(tb, 0, 12, ribbon_str, bgcolor=#0f172a, text_color=#38bdf8, text_size=size.tiny)
