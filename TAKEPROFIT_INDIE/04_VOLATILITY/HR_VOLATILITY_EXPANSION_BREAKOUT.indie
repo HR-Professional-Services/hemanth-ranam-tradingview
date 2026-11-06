@@ -1,0 +1,154 @@
+# indie:lang_version = 5
+from indie import indicator, MainContext, sec_context, param, plot, color, MutSeriesF
+from indie.algorithms import Highest, Lowest, Atr, Ema, Sma
+
+@sec_context
+def SecHTF200(self):
+    htf_ema = Ema.new(self.close, 200)
+    return htf_ema[0], self.close[0]
+
+@indicator('HR Volatility Expansion Breakout Pro [Exness]', overlay_main_pane=True)
+@param.int('compression_bars', default=20, min=5, max=100, title='Compression Lookback Window')
+@param.float('max_compression_atr', default=1.80, min=0.5, step=0.1, title='Max Range / ATR Ratio (Squeeze)')
+@param.int('atr_len', default=14, min=1, title='ATR Period')
+@param.bool('use_volume_filter', default=False, title='Enable Volume Expansion Filter (Universal Forex/CFD safe)')
+@param.float('min_volume_mult', default=1.25, min=1.0, step=0.05, title='Min Volume Expansion Multiplier')
+@param.time_frame('htf_frame', default='60', title='HTF Baseline (1H)')
+@param.bool('use_htf_filter', default=True, title='Enable HTF Trend Filter')
+@param.bool('enable_long', default=True, title='Enable Bullish Breakouts')
+@param.bool('enable_short', default=True, title='Enable Bearish Breakouts')
+@plot.line(id='box_upper', color=color.AQUA, title='Compression Box Top', line_width=1)
+@plot.line(id='box_lower', color=color.AQUA, title='Compression Box Bottom', line_width=1)
+@plot.fill('box_upper', 'box_lower', color=color.AQUA(0.08))
+@plot.marker(
+    title='Bullish Volatility Breakout',
+    color=color.LIME,
+    style=plot.marker_style.CIRCLE,
+    position=plot.marker_position.BELOW,
+    size=8,
+    display_options=plot.MarkerDisplayOptions(pane=True, status_line=False, price_label=False)
+)
+@plot.marker(
+    title='Bearish Volatility Breakdown',
+    color=color.RED,
+    style=plot.marker_style.CIRCLE,
+    position=plot.marker_position.ABOVE,
+    size=8,
+    display_options=plot.MarkerDisplayOptions(pane=True, status_line=False, price_label=False)
+)
+class Main(MainContext):
+    def __init__(
+        self,
+        compression_bars,
+        max_compression_atr,
+        atr_len,
+        use_volume_filter,
+        min_volume_mult,
+        htf_frame,
+        use_htf_filter,
+        enable_long,
+        enable_short
+    ):
+        self._sec_htf_ema, self._sec_htf_close = self.calc_on(SecHTF200, time_frame=htf_frame)
+        self._comp_bars = compression_bars
+        self._max_comp_atr = max_compression_atr
+        self._atr_len = atr_len
+        self._use_vol = use_volume_filter
+        self._min_vol_mult = min_volume_mult
+        self._use_htf = use_htf_filter
+        self._enable_long = enable_long
+        self._enable_short = enable_short
+
+    def calc(self):
+        # 1. Indicator algorithms
+        atr = Atr.new(self._atr_len)
+        hh = Highest.new(self.high, self._comp_bars)
+        ll = Lowest.new(self.low, self._comp_bars)
+        vol_avg = Sma.new(self.volume, 20)
+
+        # 2. State memory
+        box_top = MutSeriesF.new(init=0.0)
+        box_bot = MutSeriesF.new(init=0.0)
+        last_breakout = MutSeriesF.new(init=0.0)
+
+        # 3. Compression Box calculation (evaluated over bars [2 .. 2+comp_bars])
+        box_hi = hh[2]
+        box_lo = ll[2]
+        box_height = box_hi - box_lo
+        box_top[0] = box_hi
+        box_bot[0] = box_lo
+
+        atr_val = atr[1]
+        if atr_val <= 0.0:
+            atr_val = 0.00001
+
+        # Volatility squeeze test
+        is_squeezed = (box_height <= atr_val * self._max_comp_atr) and (box_height > 0.0)
+
+        # Volume expansion test
+        vol_confirmed = True
+        if self._use_vol:
+            avg_v = vol_avg[1]
+            if avg_v > 0.0:
+                vol_confirmed = self.volume[1] >= (avg_v * self._min_vol_mult)
+
+        # HTF Trend alignment
+        htf_bull = True
+        htf_bear = True
+        if self._use_htf:
+            htf_bull = self._sec_htf_close[1] > self._sec_htf_ema[1]
+            htf_bear = self._sec_htf_close[1] < self._sec_htf_ema[1]
+
+        # Breakout validation on closed bar [1]
+        c1 = self.close[1]
+        o1 = self.open[1]
+        c2 = self.close[2]
+
+        bullish_break = (
+            self._enable_long and
+            is_squeezed and
+            vol_confirmed and
+            htf_bull and
+            (c2 <= box_hi) and
+            (c1 > box_hi) and
+            (c1 > o1)
+        )
+
+        bearish_break = (
+            self._enable_short and
+            is_squeezed and
+            vol_confirmed and
+            htf_bear and
+            (c2 >= box_lo) and
+            (c1 < box_lo) and
+            (c1 < o1)
+        )
+
+        bull_confirmed = False
+        bear_confirmed = False
+
+        if bullish_break and last_breakout[1] != 1.0:
+            bull_confirmed = True
+            last_breakout[0] = 1.0
+        elif bearish_break and last_breakout[1] != -1.0:
+            bear_confirmed = True
+            last_breakout[0] = -1.0
+        else:
+            last_breakout[0] = last_breakout[1]
+
+        # 4. Output Markers
+        bull_marker = plot.Marker(value=self.low[1], color=color.rgba(0, 0, 0, 0))
+        if bull_confirmed:
+            bull_marker = plot.Marker(value=self.low[1], color=color.LIME)
+
+        bear_marker = plot.Marker(value=self.high[1], color=color.rgba(0, 0, 0, 0))
+        if bear_confirmed:
+            bear_marker = plot.Marker(value=self.high[1], color=color.RED)
+
+        return (
+            box_top[0],
+            box_bot[0],
+            plot.Fill(color=color.AQUA(0.08)),
+            bull_marker,
+            bear_marker
+        )

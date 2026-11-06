@@ -1,0 +1,114 @@
+# indie:lang_version = 5
+from indie import indicator, param, plot, color, MutSeriesF
+from indie.algorithms import Highest, Lowest, Atr
+
+@indicator('HR Liquidity Sweep Reversal Pro [Exness]', overlay_main_pane=True)
+@param.int('lookback_bars', default=24, min=5, max=100, title='Swing Lookback Window')
+@param.int('atr_len', default=14, min=1, title='ATR Period')
+@param.float('min_sweep_atr', default=0.10, min=0.01, step=0.05, title='Min Sweep Penetration (x ATR)')
+@param.float('max_sweep_atr', default=2.50, min=0.5, step=0.1, title='Max Sweep Penetration (x ATR)')
+@param.float('min_displacement', default=0.50, min=0.1, max=0.9, step=0.05, title='Min Reversal Displacement Ratio')
+@param.bool('enable_long', default=True, title='Enable Bullish Sweeps (SSL)')
+@param.bool('enable_short', default=True, title='Enable Bearish Sweeps (BSL)')
+@plot.line(id='bsl_line', color=color.RED(0.8), title='Buy-Side Liquidity (BSL)', line_width=1)
+@plot.line(id='ssl_line', color=color.GREEN(0.8), title='Sell-Side Liquidity (SSL)', line_width=1)
+@plot.marker(
+    title='Bullish SSL Sweep',
+    color=color.LIME,
+    style=plot.marker_style.CIRCLE,
+    position=plot.marker_position.BELOW,
+    size=8,
+    display_options=plot.MarkerDisplayOptions(pane=True, status_line=False, price_label=False)
+)
+@plot.marker(
+    title='Bearish BSL Sweep',
+    color=color.MAGENTA,
+    style=plot.marker_style.CIRCLE,
+    position=plot.marker_position.ABOVE,
+    size=8,
+    display_options=plot.MarkerDisplayOptions(pane=True, status_line=False, price_label=False)
+)
+def Main(
+    self,
+    lookback_bars: int,
+    atr_len: int,
+    min_sweep_atr: float,
+    max_sweep_atr: float,
+    min_displacement: float,
+    enable_long: bool,
+    enable_short: bool
+):
+    # 1. Determine Dynamic Reference Extremes (Exclude bar 0 & 1 to test against past structure)
+    # Highest high and lowest low of lookback window
+    hh = Highest.new(self.high, lookback_bars)
+    ll = Lowest.new(self.low, lookback_bars)
+    atr = Atr.new(atr_len)
+
+    # 2. State memory for tracked BSL / SSL levels and alerts
+    active_bsl = MutSeriesF.new(init=0.0)
+    active_ssl = MutSeriesF.new(init=0.0)
+    last_sweep = MutSeriesF.new(init=0.0)
+
+    # Reference levels prior to bar 1
+    ref_bsl = hh[2]
+    ref_ssl = ll[2]
+    active_bsl[0] = ref_bsl
+    active_ssl[0] = ref_ssl
+
+    # 3. Bar [1] Geometry
+    h1 = self.high[1]
+    l1 = self.low[1]
+    c1 = self.close[1]
+    o1 = self.open[1]
+    bar_range = h1 - l1
+    atr_val = atr[1]
+
+    # Guard zero divide
+    if bar_range <= 0.0:
+        bar_range = 0.00001
+    if atr_val <= 0.0:
+        atr_val = 0.00001
+
+    # 4. Sweep Detection
+    # Bearish BSL Sweep: High pierces ref_bsl, but Close drops back below ref_bsl
+    penetration_bsl = h1 - ref_bsl
+    is_bsl_penetrated = (penetration_bsl >= min_sweep_atr * atr_val) and (penetration_bsl <= max_sweep_atr * atr_val)
+    bsl_rejection = c1 < ref_bsl
+    bear_displacement = (h1 - c1) / bar_range >= min_displacement
+    bearish_sweep_trigger = enable_short and is_bsl_penetrated and bsl_rejection and bear_displacement
+
+    # Bullish SSL Sweep: Low pierces ref_ssl, but Close recovers back above ref_ssl
+    penetration_ssl = ref_ssl - l1
+    is_ssl_penetrated = (penetration_ssl >= min_sweep_atr * atr_val) and (penetration_ssl <= max_sweep_atr * atr_val)
+    ssl_rejection = c1 > ref_ssl
+    bull_displacement = (c1 - l1) / bar_range >= min_displacement
+    bullish_sweep_trigger = enable_long and is_ssl_penetrated and ssl_rejection and bull_displacement
+
+    # 5. State Machine Transition
+    bull_confirmed = False
+    bear_confirmed = False
+
+    if bullish_sweep_trigger and last_sweep[1] != 1.0:
+        bull_confirmed = True
+        last_sweep[0] = 1.0
+    elif bearish_sweep_trigger and last_sweep[1] != -1.0:
+        bear_confirmed = True
+        last_sweep[0] = -1.0
+    else:
+        last_sweep[0] = last_sweep[1]
+
+    # 6. Output Markers
+    bull_marker = plot.Marker(value=l1, color=color.rgba(0, 0, 0, 0))
+    if bull_confirmed:
+        bull_marker = plot.Marker(value=l1, color=color.LIME)
+
+    bear_marker = plot.Marker(value=h1, color=color.rgba(0, 0, 0, 0))
+    if bear_confirmed:
+        bear_marker = plot.Marker(value=h1, color=color.MAGENTA)
+
+    return (
+        active_bsl[0],
+        active_ssl[0],
+        bull_marker,
+        bear_marker
+    )

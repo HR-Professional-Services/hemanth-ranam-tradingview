@@ -1,0 +1,162 @@
+# indie:lang_version = 5
+from indie import indicator, MainContext, sec_context, param, plot, color, MutSeriesF
+from indie.algorithms import Highest, Lowest, Rsi, Ema
+
+@sec_context
+def SecHTF200(self):
+    htf_ema = Ema.new(self.close, 200)
+    return htf_ema[0], self.close[0]
+
+@indicator('HR Market Structure BOS/CHOCH Pro [Exness]', overlay_main_pane=True)
+@param.int('pivot_strength', default=3, min=1, max=10, title='Pivot Strength (Left/Right Bars)')
+@param.int('lookback_window', default=40, min=10, max=100, title='Structure Search Window')
+@param.int('rsi_period', default=14, min=2, title='RSI Confirmation Period')
+@param.float('bullish_rsi_min', default=53.0, min=50.0, max=70.0, step=0.5, title='Bullish BOS Min RSI')
+@param.float('bearish_rsi_max', default=47.0, min=30.0, max=50.0, step=0.5, title='Bearish BOS Max RSI')
+@param.time_frame('htf_frame', default='60', title='HTF Macro Baseline (1H)')
+@param.bool('use_htf_filter', default=true, title='Enable HTF Trend Filter')
+@param.bool('enable_long', default=true, title='Enable Bullish BOS Signals')
+@param.bool('enable_short', default=true, title='Enable Bearish BOS Signals')
+@plot.line(id='swing_high_line', color=color.RED(0.7), title='Structural Swing High', line_width=1)
+@plot.line(id='swing_low_line', color=color.GREEN(0.7), title='Structural Swing Low', line_width=1)
+@plot.marker(
+    title='Bullish BOS Breakout',
+    color=color.LIME,
+    style=plot.marker_style.CIRCLE,
+    position=plot.marker_position.BELOW,
+    size=8,
+    display_options=plot.MarkerDisplayOptions(pane=True, status_line=False, price_label=False)
+)
+@plot.marker(
+    title='Bearish BOS Breakdown',
+    color=color.RED,
+    style=plot.marker_style.CIRCLE,
+    position=plot.marker_position.ABOVE,
+    size=8,
+    display_options=plot.MarkerDisplayOptions(pane=True, status_line=False, price_label=False)
+)
+class Main(MainContext):
+    def __init__(
+        self,
+        pivot_strength,
+        lookback_window,
+        rsi_period,
+        bullish_rsi_min,
+        bearish_rsi_max,
+        htf_frame,
+        use_htf_filter,
+        enable_long,
+        enable_short
+    ):
+        self._sec_htf_ema, self._sec_htf_close = self.calc_on(SecHTF200, time_frame=htf_frame)
+        self._pivot_strength = pivot_strength
+        self._lookback = lookback_window
+        self._rsi_period = rsi_period
+        self._bull_rsi = bullish_rsi_min
+        self._bear_rsi = bearish_rsi_max
+        self._use_htf = use_htf_filter
+        self._enable_long = enable_long
+        self._enable_short = enable_short
+
+    def calc(self):
+        # 1. Momentum & Extremes
+        rsi = Rsi.new(self.close, self._rsi_period)
+        hh = Highest.new(self.high, self._lookback)
+        ll = Lowest.new(self.low, self._lookback)
+
+        # 2. State memory for confirmed pivots and signals
+        confirmed_sh = MutSeriesF.new(init=0.0)
+        confirmed_sl = MutSeriesF.new(init=0.0)
+        last_bos = MutSeriesF.new(init=0.0)
+
+        # Detect Fractal Pivot High on bar [1 + pivot_strength]
+        # In a 3-bar pivot, bar 4 must be higher than bars 1, 2, 3 and bars 5, 6, 7
+        p = self._pivot_strength
+        is_pivot_high = True
+        is_pivot_low = True
+
+        pivot_eval_high = self.high[p + 1]
+        pivot_eval_low = self.low[p + 1]
+
+        for i in range(1, p + 1):
+            if self.high[i] >= pivot_eval_high:
+                is_pivot_high = False
+            if self.high[p + 1 + i] >= pivot_eval_high:
+                is_pivot_high = False
+
+            if self.low[i] <= pivot_eval_low:
+                is_pivot_low = False
+            if self.low[p + 1 + i] <= pivot_eval_low:
+                is_pivot_low = False
+
+        if is_pivot_high:
+            confirmed_sh[0] = pivot_eval_high
+        else:
+            confirmed_sh[0] = confirmed_sh[1]
+
+        if is_pivot_low:
+            confirmed_sl[0] = pivot_eval_low
+        else:
+            confirmed_sl[0] = confirmed_sl[1]
+
+        # 3. HTF Filter
+        htf_bull = True
+        htf_bear = True
+        if self._use_htf:
+            htf_bull = self._sec_htf_close[1] > self._sec_htf_ema[1]
+            htf_bear = self._sec_htf_close[1] < self._sec_htf_ema[1]
+
+        # 4. Break of Structure (BOS) Validation on closed bar [1]
+        c1 = self.close[1]
+        c2 = self.close[2]
+        sh = confirmed_sh[1]
+        sl = confirmed_sl[1]
+        rsi_1 = rsi[1]
+
+        # Bullish BOS: Candle closes above prior confirmed swing high with momentum & HTF trend
+        bullish_bos = (
+            self._enable_long and
+            (sh > 0.0) and
+            (c2 <= sh) and
+            (c1 > sh) and
+            (rsi_1 >= self._bull_rsi) and
+            htf_bull
+        )
+
+        # Bearish BOS: Candle closes below prior confirmed swing low with momentum & HTF trend
+        bearish_bos = (
+            self._enable_short and
+            (sl > 0.0) and
+            (c2 >= sl) and
+            (c1 < sl) and
+            (rsi_1 <= self._bear_rsi) and
+            htf_bear
+        )
+
+        bull_confirmed = False
+        bear_confirmed = False
+
+        if bullish_bos and last_bos[1] != 1.0:
+            bull_confirmed = True
+            last_bos[0] = 1.0
+        elif bearish_bos and last_bos[1] != -1.0:
+            bear_confirmed = True
+            last_bos[0] = -1.0
+        else:
+            last_bos[0] = last_bos[1]
+
+        # 5. Visual Markers
+        bull_marker = plot.Marker(value=self.low[1], color=color.rgba(0, 0, 0, 0))
+        if bull_confirmed:
+            bull_marker = plot.Marker(value=self.low[1], color=color.LIME)
+
+        bear_marker = plot.Marker(value=self.high[1], color=color.rgba(0, 0, 0, 0))
+        if bear_confirmed:
+            bear_marker = plot.Marker(value=self.high[1], color=color.RED)
+
+        return (
+            confirmed_sh[0],
+            confirmed_sl[0],
+            bull_marker,
+            bear_marker
+        )

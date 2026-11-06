@@ -1,0 +1,111 @@
+# indie:lang_version = 5
+from indie import indicator, param, plot, color, MutSeriesF
+from indie.algorithms import Ema, Atr
+
+@indicator('HR 9 EMA Buy/Sell Pro [Exness]', overlay_main_pane=True)
+@param.int('ema_len', default=9, min=1, title='EMA Length')
+@param.str('mode', default='Crossover with Rejection', options=['Pure Crossover', 'Pullback & Rejection', 'Crossover with Rejection'], title='Signal Execution Mode')
+@param.bool('enable_long', default=True, title='Enable BUY Signals')
+@param.bool('enable_short', default=True, title='Enable SELL Signals')
+@param.int('atr_len', default=14, min=1, title='ATR Reference Period')
+@param.float('atr_multiplier', default=1.5, min=0.1, step=0.1, title='Suggested SL ATR Multiplier')
+@plot.line(id='ema9', color=color.GREEN, title='9 EMA Line', line_width=2)
+@plot.line(id='sl_guide', color=color.RED, title='Suggested Risk Reference Level', line_width=1)
+@plot.marker(
+    title='Buy Signal',
+    color=color.GREEN,
+    style=plot.marker_style.CIRCLE,
+    position=plot.marker_position.BELOW,
+    size=6,
+    display_options=plot.MarkerDisplayOptions(pane=True, status_line=False, price_label=False)
+)
+@plot.marker(
+    title='Sell Signal',
+    color=color.RED,
+    style=plot.marker_style.CIRCLE,
+    position=plot.marker_position.ABOVE,
+    size=6,
+    display_options=plot.MarkerDisplayOptions(pane=True, status_line=False, price_label=False)
+)
+def Main(
+    self,
+    ema_len: int,
+    mode: str,
+    enable_long: bool,
+    enable_short: bool,
+    atr_len: int,
+    atr_multiplier: float
+):
+    # 1. Indicator Math Algorithms
+    ema = Ema.new(self.close, ema_len)
+    atr = Atr.new(atr_len)
+
+    # 2. State Memory for Non-Repainting and De-duplicating Signals
+    # last_signal: 1 = BUY fired, -1 = SELL fired, 0 = neutral
+    last_signal = MutSeriesF.new(init=0.0)
+    sl_ref = MutSeriesF.new(init=0.0)
+
+    # 3. Closed-bar evaluations on bar index [1]
+    # Candle geometry
+    close_1 = self.close[1]
+    open_1 = self.open[1]
+    high_1 = self.high[1]
+    low_1 = self.low[1]
+    ema_1 = ema[1]
+    ema_2 = ema[2]
+    close_2 = self.close[2]
+
+    # Mode 1: Pure Crossover
+    cross_up = close_2 <= ema_2 and close_1 > ema_1
+    cross_dn = close_2 >= ema_2 and close_1 < ema_1
+
+    # Mode 2: Pullback & Rejection (Price touches or tests 9 EMA and rejects in trend direction)
+    rejection_up = low_1 <= ema_1 and close_1 > ema_1 and close_1 > open_1
+    rejection_dn = high_1 >= ema_1 and close_1 < ema_1 and close_1 < open_1
+
+    # Mode 3: Combined
+    bullish_trigger = False
+    bearish_trigger = False
+
+    if mode == 'Pure Crossover':
+        bullish_trigger = cross_up
+        bearish_trigger = cross_dn
+    elif mode == 'Pullback & Rejection':
+        bullish_trigger = rejection_up
+        bearish_trigger = rejection_dn
+    else:
+        # Crossover with Rejection
+        bullish_trigger = cross_up or (rejection_up and close_1 > close_2)
+        bearish_trigger = cross_dn or (rejection_dn and close_1 < close_2)
+
+    # State Machine: Do not repeat signals consecutively in the same direction
+    buy_confirmed = False
+    sell_confirmed = False
+
+    if enable_long and bullish_trigger and last_signal[1] != 1.0:
+        buy_confirmed = True
+        last_signal[0] = 1.0
+        sl_ref[0] = low_1 - (atr[1] * atr_multiplier)
+    elif enable_short and bearish_trigger and last_signal[1] != -1.0:
+        sell_confirmed = True
+        last_signal[0] = -1.0
+        sl_ref[0] = high_1 + (atr[1] * atr_multiplier)
+    else:
+        last_signal[0] = last_signal[1]
+        sl_ref[0] = sl_ref[1]
+
+    # 4. Marker Visualization (Only plot on confirmed signal bar)
+    buy_marker = plot.Marker(value=low_1, color=color.rgba(0, 0, 0, 0))
+    if buy_confirmed:
+        buy_marker = plot.Marker(value=low_1, color=color.GREEN)
+
+    sell_marker = plot.Marker(value=high_1, color=color.rgba(0, 0, 0, 0))
+    if sell_confirmed:
+        sell_marker = plot.Marker(value=high_1, color=color.RED)
+
+    return (
+        ema[0],
+        sl_ref[0],
+        buy_marker,
+        sell_marker
+    )

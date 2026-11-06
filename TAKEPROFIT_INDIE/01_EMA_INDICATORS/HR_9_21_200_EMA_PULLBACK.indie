@@ -1,0 +1,123 @@
+# indie:lang_version = 5
+from indie import indicator, MainContext, sec_context, param, plot, color, MutSeriesF
+from indie.algorithms import Ema, Atr
+
+@sec_context
+def SecHTF(self):
+    # HTF 200 EMA calculation
+    htf_ema = Ema.new(self.close, 200)
+    return htf_ema[0], self.close[0]
+
+@indicator('HR EMA Pullback Pro [Exness]', overlay_main_pane=True)
+@param.int('fast_len', default=9, min=1, title='Fast EMA Length')
+@param.int('slow_len', default=21, min=1, title='Slow EMA Length')
+@param.int('trend_len', default=200, min=1, title='Trend Baseline EMA')
+@param.time_frame('htf_frame', default='60', title='Higher Timeframe Filter')
+@param.bool('use_htf_filter', default=True, title='Enable HTF Trend Filter')
+@param.int('atr_len', default=14, min=1, title='ATR Period')
+@param.float('atr_multiplier', default=1.5, min=0.1, step=0.1, title='Suggested SL ATR Multiplier')
+@plot.line(id='ema_fast', color=color.GREEN, title='EMA 9 Fast', line_width=2)
+@plot.line(id='ema_slow', color=color.ORANGE, title='EMA 21 Slow', line_width=1)
+@plot.line(id='ema_trend', color=color.BLUE, title='EMA 200 Trend', line_width=3)
+@plot.line(id='sl_guide', color=color.RED, title='Suggested SL Level', line_width=1)
+@plot.fill('ema_fast', 'ema_slow', color=color.GREEN(0.12))
+@plot.marker(
+    title='Pullback Buy Signal',
+    color=color.GREEN,
+    style=plot.marker_style.CIRCLE,
+    position=plot.marker_position.BELOW,
+    size=7,
+    display_options=plot.MarkerDisplayOptions(pane=True, status_line=False, price_label=False)
+)
+@plot.marker(
+    title='Pullback Sell Signal',
+    color=color.RED,
+    style=plot.marker_style.CIRCLE,
+    position=plot.marker_position.ABOVE,
+    size=7,
+    display_options=plot.MarkerDisplayOptions(pane=True, status_line=False, price_label=False)
+)
+class Main(MainContext):
+    def __init__(self, fast_len, slow_len, trend_len, htf_frame, use_htf_filter, atr_len, atr_multiplier):
+        # Bind Secondary Context for HTF (1H) trend baseline
+        self._sec_htf_ema, self._sec_htf_close = self.calc_on(SecHTF, time_frame=htf_frame)
+        self._fast_len = fast_len
+        self._slow_len = slow_len
+        self._trend_len = trend_len
+        self._use_htf = use_htf_filter
+        self._atr_len = atr_len
+        self._atr_mult = atr_multiplier
+
+    def calc(self):
+        # 1. Algorithms
+        ema_fast = Ema.new(self.close, self._fast_len)
+        ema_slow = Ema.new(self.close, self._slow_len)
+        ema_trend = Ema.new(self.close, self._trend_len)
+        atr = Atr.new(self._atr_len)
+
+        # 2. State tracking series
+        last_signal = MutSeriesF.new(init=0.0)
+        sl_ref = MutSeriesF.new(init=0.0)
+
+        # 3. Dynamic cloud fill color based on 9/21 alignment
+        fill_col = color.GREEN(0.12)
+        if ema_fast[0] < ema_slow[0]:
+            fill_col = color.RED(0.12)
+
+        # 4. Closed bar checks [1]
+        close_1 = self.close[1]
+        low_1 = self.low[1]
+        high_1 = self.high[1]
+        fast_1 = ema_fast[1]
+        slow_1 = ema_slow[1]
+        trend_1 = ema_trend[1]
+
+        # Local Trend Alignment
+        bullish_alignment = fast_1 > slow_1 and slow_1 > trend_1 and close_1 > trend_1
+        bearish_alignment = fast_1 < slow_1 and slow_1 < trend_1 and close_1 < trend_1
+
+        # HTF Trend Agreement (lookahead_off via index [1])
+        htf_bullish = True
+        htf_bearish = True
+        if self._use_htf:
+            htf_bullish = self._sec_htf_close[1] > self._sec_htf_ema[1]
+            htf_bearish = self._sec_htf_close[1] < self._sec_htf_ema[1]
+
+        # Pullback Zone Entry & Rejection
+        # Bullish: Low penetrates EMA 9 and reaches into EMA 21, but Close stays above EMA 21
+        bullish_pullback = bullish_alignment and htf_bullish and (low_1 <= fast_1) and (close_1 >= slow_1)
+        bearish_pullback = bearish_alignment and htf_bearish and (high_1 >= fast_1) and (close_1 <= slow_1)
+
+        buy_confirmed = False
+        sell_confirmed = False
+
+        if bullish_pullback and last_signal[1] != 1.0:
+            buy_confirmed = True
+            last_signal[0] = 1.0
+            sl_ref[0] = low_1 - (atr[1] * self._atr_mult)
+        elif bearish_pullback and last_signal[1] != -1.0:
+            sell_confirmed = True
+            last_signal[0] = -1.0
+            sl_ref[0] = high_1 + (atr[1] * self._atr_mult)
+        else:
+            last_signal[0] = last_signal[1]
+            sl_ref[0] = sl_ref[1]
+
+        # 5. Visual Markers
+        buy_marker = plot.Marker(value=low_1, color=color.rgba(0, 0, 0, 0))
+        if buy_confirmed:
+            buy_marker = plot.Marker(value=low_1, color=color.GREEN)
+
+        sell_marker = plot.Marker(value=high_1, color=color.rgba(0, 0, 0, 0))
+        if sell_confirmed:
+            sell_marker = plot.Marker(value=high_1, color=color.RED)
+
+        return (
+            ema_fast[0],
+            ema_slow[0],
+            ema_trend[0],
+            sl_ref[0],
+            plot.Fill(color=fill_col),
+            buy_marker,
+            sell_marker
+        )
